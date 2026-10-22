@@ -4,7 +4,7 @@
 Core API Client for NWR-945X 4G Portable Wi-Fi Modem
 Provides methods for:
 - Modem status & battery telemetry
-- SMS reading, decoding, sending, deleting, and marking as read
+- SMS reading (both Local and SIM Card storage), decoding, sending, deleting, and marking as read
 - Solar/Jalali (هجری شمسی) date conversion in Iran/Tehran time
 - Missed call detection
 - USSD code dialing
@@ -14,7 +14,7 @@ Provides methods for:
 import requests
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 MODEM_IP = "192.168.1.1"
@@ -56,7 +56,7 @@ def gregorian_to_jalali(gy: int, gm: int, gd: int):
 def parse_modem_time_to_shamsi(raw_time: str) -> str:
     """
     Parses modem timestamp (e.g. '26,10,03,19,06,11,+3')
-    into Shamsi (Persian) format: '۱۱ مهر ۱۴۰۵ - ۱۹:۰۶'
+    into Shamsi (Persian) format: '۱۱ مهر ۱۴۰۵ - ساعت ۱۹:۰۶'
     """
     if not raw_time:
         return "--"
@@ -70,7 +70,6 @@ def parse_modem_time_to_shamsi(raw_time: str) -> str:
             minute = int(parts[4])
             second = int(parts[5])
 
-            # Convert to Jalali
             jy, jm, jd = gregorian_to_jalali(gy, gm, gd)
             month_name = PERSIAN_MONTHS[jm]
             return f"{jd} {month_name} {jy} - ساعت {hour:02d}:{minute:02d}"
@@ -123,87 +122,130 @@ class ModemClient:
             print(f"[ModemClient] get_status error: {e}")
         return None
 
-    def get_sms_list(self, page: int = 1, data_per_page: int = 20, box: str = "inbox") -> Dict[str, Any]:
+    def get_sms_list(self, page: int = 1, data_per_page: int = 50, box: str = "inbox") -> Dict[str, Any]:
         """
-        Fetches and decodes SMS messages from modem with Shamsi date formatting.
-        box: 'inbox' (received), 'outbox' (sent)
+        Fetches and decodes SMS messages from both local device and SIM card memory.
+        Merges and sorts all messages chronologically.
         """
-        flag = "GET_RCV_SMS_LOCAL" if box == "inbox" else "GET_SENT_SMS_LOCAL"
         url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
-        payload = {
-            "message_flag": flag,
-            "page_number": page,
-            "data_per_page": str(data_per_page)
-        }
         
-        result = {
-            "messages": [],
+        all_raw_messages = []
+        
+        if box == "inbox":
+            # 1. Fetch Local Device Inbox
+            try:
+                r_local = requests.post(
+                    url,
+                    json={"message_flag": "GET_RCV_SMS_LOCAL", "page_number": 1, "data_per_page": str(data_per_page)},
+                    timeout=self.timeout
+                )
+                if r_local.status_code == 200:
+                    all_raw_messages.extend(r_local.json().get("message_list", []))
+            except Exception as e:
+                print(f"[ModemClient] Fetch local SMS error: {e}")
+
+            # 2. Fetch SIM Card Inbox
+            try:
+                r_sim = requests.post(
+                    url,
+                    json={"message_flag": "GET_SIM_SMS", "page_number": 1, "data_per_page": str(data_per_page)},
+                    timeout=self.timeout
+                )
+                if r_sim.status_code == 200:
+                    all_raw_messages.extend(r_sim.json().get("message_list", []))
+            except Exception as e:
+                print(f"[ModemClient] Fetch SIM SMS error: {e}")
+        else:
+            # Outbox
+            try:
+                r_sent = requests.post(
+                    url,
+                    json={"message_flag": "GET_SENT_SMS_LOCAL", "page_number": 1, "data_per_page": str(data_per_page)},
+                    timeout=self.timeout
+                )
+                if r_sent.status_code == 200:
+                    all_raw_messages.extend(r_sent.json().get("message_list", []))
+            except Exception as e:
+                print(f"[ModemClient] Fetch sent SMS error: {e}")
+
+        # Deduplicate by message ID / index
+        seen_ids = set()
+        unique_raw = []
+        for m in all_raw_messages:
+            idx = m.get("index")
+            if idx and idx not in seen_ids:
+                seen_ids.add(idx)
+                unique_raw.append(m)
+
+        # Sort descending by received timestamp (newest first)
+        unique_raw.sort(key=lambda x: x.get("received", ""), reverse=True)
+
+        decoded_messages = []
+        unread_count = 0
+        for item in unique_raw:
+            sender = uni_decode(item.get("from", "")).lstrip(";")
+            text = uni_decode(item.get("subject", ""))
+            recv_time_raw = item.get("received", "")
+            recv_time_shamsi = parse_modem_time_to_shamsi(recv_time_raw)
+            status = str(item.get("status", "0"))  # 1 = unread, 0 = read
+            msg_id = item.get("index", "")
+            
+            is_unread = status == "1"
+            if is_unread:
+                unread_count += 1
+            
+            # Detect missed call SMS from operator
+            is_missed_call = False
+            caller_number = ""
+            if "تماس از دست رفته" in text or "تماس ازدست رفته" in text or "missed call" in text.lower():
+                is_missed_call = True
+                for word in text.split():
+                    clean_word = word.strip(".,;:\"'()[]{}")
+                    if clean_word.startswith("+98") or (clean_word.startswith("09") and len(clean_word) >= 11):
+                        caller_number = clean_word
+                        break
+
+            # Determine storage tag (SIM vs Local)
+            storage_type = "SIM" if "SRCV" in msg_id else "دستگاه"
+
+            decoded_messages.append({
+                "id": msg_id,
+                "sender": sender,
+                "text": text,
+                "time": recv_time_shamsi,
+                "raw_time": recv_time_raw,
+                "is_unread": is_unread,
+                "status": status,
+                "storage": storage_type,
+                "is_missed_call": is_missed_call,
+                "caller_number": caller_number
+            })
+
+        return {
+            "messages": decoded_messages,
             "page_number": page,
             "total_pages": 1,
-            "total_messages": 0
+            "total_messages": len(decoded_messages),
+            "unread_count": unread_count
         }
-        
-        try:
-            r = requests.post(url, json=payload, timeout=self.timeout)
-            if r.status_code == 200:
-                data = r.json()
-                raw_list = data.get("message_list", [])
-                result["total_pages"] = int(data.get("total_page_number", 1))
-                result["total_messages"] = int(data.get("sms_nv_rev_long_num", len(raw_list)))
-                
-                decoded_messages = []
-                for item in raw_list:
-                    sender = uni_decode(item.get("from", "")).lstrip(";")
-                    text = uni_decode(item.get("subject", ""))
-                    recv_time_raw = item.get("received", "")
-                    recv_time_shamsi = parse_modem_time_to_shamsi(recv_time_raw)
-                    status = str(item.get("status", "0"))  # 1 = unread, 0 = read
-                    msg_id = item.get("index", "")
-                    
-                    # Detect missed call SMS from operator
-                    is_missed_call = False
-                    caller_number = ""
-                    if "تماس از دست رفته" in text or "تماس ازدست رفته" in text or "missed call" in text.lower():
-                        is_missed_call = True
-                        for word in text.split():
-                            clean_word = word.strip(".,;:\"'()[]{}")
-                            if clean_word.startswith("+98") or (clean_word.startswith("09") and len(clean_word) >= 11):
-                                caller_number = clean_word
-                                break
-
-                    decoded_messages.append({
-                        "id": msg_id,
-                        "sender": sender,
-                        "text": text,
-                        "time": recv_time_shamsi,
-                        "raw_time": recv_time_raw,
-                        "is_unread": status == "1",
-                        "status": status,
-                        "is_missed_call": is_missed_call,
-                        "caller_number": caller_number
-                    })
-                
-                result["messages"] = decoded_messages
-        except Exception as e:
-            print(f"[ModemClient] get_sms_list error: {e}")
-            
-        return result
 
     def mark_sms_as_read(self, msg_id: str) -> bool:
         """
-        Marks an SMS as read on the modem hardware.
-        msg_id: e.g. 'LRCV14,LRCV15,' or 'LRCV14'
+        Marks an SMS as read on modem hardware (auto-detects SIM vs Device memory).
         """
         if not msg_id:
             return False
         clean_id = msg_id if msg_id.endswith(",") else f"{msg_id},"
+        
+        # SRCV = SIM Card (mem_store 0), LRCV = Local Device (mem_store 1)
+        mem_store = "0" if "SRCV" in clean_id else "1"
         
         url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
         payload = {
             "message_flag": "SET_MSG_READ",
             "sms_cmd": "7",
             "tags": "12",
-            "mem_store": "1",
+            "mem_store": mem_store,
             "read_message_id": clean_id
         }
         try:
@@ -213,6 +255,31 @@ class ModemClient:
                 return str(data.get("sms_cmd_status_result")) == "3"
         except Exception as e:
             print(f"[ModemClient] mark_sms_as_read error: {e}")
+        return False
+
+    def delete_sms(self, index_ids: str) -> bool:
+        """Deletes SMS by index id(s) (e.g. 'SRCV49,SRCV50,' or 'LRCV14,')."""
+        if not index_ids.endswith(","):
+            index_ids += ","
+            
+        mem_store = "0" if "SRCV" in index_ids else "1"
+        
+        url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
+        payload = {
+            "message_flag": "DELETE_SMS",
+            "sms_cmd": "6",
+            "tags": "12",
+            "mem_store": mem_store,
+            "delete_message_id": index_ids
+        }
+        
+        try:
+            r = requests.post(url, json=payload, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                return data.get("sms_cmd_status_result") == 3
+        except Exception as e:
+            print(f"[ModemClient] delete_sms error: {e}")
         return False
 
     def send_sms(self, phone_number: str, message_text: str) -> bool:
@@ -242,29 +309,6 @@ class ModemClient:
                 return data.get("sms_cmd_status_result") == 3
         except Exception as e:
             print(f"[ModemClient] send_sms error: {e}")
-        return False
-
-    def delete_sms(self, index_ids: str) -> bool:
-        """Deletes SMS by index id(s) (e.g. 'LRCV22,LRCV20,')."""
-        if not index_ids.endswith(","):
-            index_ids += ","
-            
-        url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
-        payload = {
-            "message_flag": "DELETE_SMS",
-            "sms_cmd": "6",
-            "tags": "12",
-            "mem_store": "1",
-            "delete_message_id": index_ids
-        }
-        
-        try:
-            r = requests.post(url, json=payload, timeout=self.timeout)
-            if r.status_code == 200:
-                data = r.json()
-                return data.get("sms_cmd_status_result") == 3
-        except Exception as e:
-            print(f"[ModemClient] delete_sms error: {e}")
         return False
 
     def send_ussd(self, code: str, timeout_sec: int = 10) -> str:
@@ -313,6 +357,7 @@ class ModemClient:
 
 if __name__ == "__main__":
     client = ModemClient()
-    sms_res = client.get_sms_list(page=1, data_per_page=3)
-    for m in sms_res["messages"]:
-        print(f"[{m['time']}] {m['sender']}: {m['text'][:50]}... (Unread: {m['is_unread']})")
+    sms_res = client.get_sms_list(page=1, data_per_page=50)
+    print(f"Total messages fetched: {sms_res['total_messages']}, Unread: {sms_res['unread_count']}")
+    for idx, m in enumerate(sms_res["messages"][:5], 1):
+        print(f"{idx}. [{m['storage']}] [{m['time']}] {m['sender']}: {m['text'][:40]}... (Unread: {m['is_unread']})")
