@@ -533,15 +533,20 @@ HTML_PAGE = """<!DOCTYPE html>
 
         <!-- Tab 3: USSD -->
         <div id="tab-ussd" class="tab-content">
-            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 16px;">استعلام بسته و شارژ (کدهای USSD)</h3>
+            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">استعلام بسته و شارژ (کدهای USSD)</h3>
+            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+                سیم‌کارت فعال روی مودم شما <b>شاتل موبایل</b> است؛ از کدهای مخصوص شاتل موبایل استفاده کنید:
+            </p>
             <div class="ussd-quick">
-                <span class="ussd-chip" onclick="setUSSD('*100#')">*100# (منوی اصلی)</span>
-                <span class="ussd-chip" onclick="setUSSD('*140*11#')">*140*11# (مانده اعتبار)</span>
-                <span class="ussd-chip" onclick="setUSSD('*1#')">*1# (شارژ و بسته)</span>
-                <span class="ussd-chip" onclick="setUSSD('*141*1#')">*141*1# (استعلام ایرانسل)</span>
+                <span class="ussd-chip" onclick="setUSSD('*1#')">✨ *1# (منوی اصلی شاتل)</span>
+                <span class="ussd-chip" onclick="setUSSD('*1*4#')">📊 *1*4# (استعلام مانده بسته شاتل)</span>
+                <span class="ussd-chip" onclick="setUSSD('*1*2#')">🌐 *1*2# (بسته‌های اینترنت)</span>
+                <span class="ussd-chip" onclick="setUSSD('*1000#')">📞 *1000# (خدمات شاتل)</span>
+                <span class="ussd-chip" onclick="setUSSD('*100#')">*100# (همراه اول)</span>
+                <span class="ussd-chip" onclick="setUSSD('*555#')">*555# (ایرانسل)</span>
             </div>
             <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-                <input type="text" id="ussd-code" placeholder="کد دستوری (مثلاً *100#)" style="direction: ltr;">
+                <input type="text" id="ussd-code" placeholder="کد دستوری (مثلاً *1# یا *1*4#)" style="direction: ltr;">
                 <button class="btn btn-primary" onclick="handleUSSD()">شماره‌گیری</button>
             </div>
             <label>نتیجه استعلام:</label>

@@ -7,7 +7,7 @@ Provides methods for:
 - SMS reading (both Local and SIM Card storage), decoding, sending, deleting, and marking as read
 - Solar/Jalali (هجری شمسی) date conversion in Iran/Tehran time
 - Missed call detection
-- USSD code dialing
+- USSD code dialing with proper network error handling
 - Device reboot
 """
 
@@ -202,10 +202,9 @@ class ModemClient:
                 for word in text.split():
                     clean_word = word.strip(".,;:\"'()[]{}")
                     if clean_word.startswith("+98") or (clean_word.startswith("09") and len(clean_word) >= 11):
-                        caller_number = clean_word
-                        break
+                                caller_number = clean_word
+                                break
 
-            # Determine storage tag (SIM vs Local)
             storage_type = "SIM" if "SRCV" in msg_id else "دستگاه"
 
             decoded_messages.append({
@@ -236,8 +235,6 @@ class ModemClient:
         if not msg_id:
             return False
         clean_id = msg_id if msg_id.endswith(",") else f"{msg_id},"
-        
-        # SRCV = SIM Card (mem_store 0), LRCV = Local Device (mem_store 1)
         mem_store = "0" if "SRCV" in clean_id else "1"
         
         url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
@@ -311,39 +308,69 @@ class ModemClient:
             print(f"[ModemClient] send_sms error: {e}")
         return False
 
-    def send_ussd(self, code: str, timeout_sec: int = 10) -> str:
-        """Sends a USSD command (e.g. '*100#') and polls for response string."""
+    def send_ussd(self, code: str, timeout_sec: int = 8) -> str:
+        """
+        Sends a USSD command (e.g. '*1#') and polls for network response.
+        Handles network error codes (Type 2, 3, 4).
+        """
+        clean_code = code.strip()
+        if not clean_code.startswith("*"):
+            clean_code = "*" + clean_code
+        if not clean_code.endswith("#"):
+            clean_code = clean_code + "#"
+
         url_set = f"{self.base_url}?method=post&module=duster&file=json_ussd_set{int(time.time()*1000)}"
         payload = {
             "action": "1",
-            "ussd_param": code
+            "ussd_param": clean_code
         }
         try:
             r = requests.post(url_set, json=payload, timeout=self.timeout)
             if r.status_code != 200:
-                return "خطا در ارسال درخواست USSD"
+                return "خطا در ارسال درخواست USSD به مودم."
         except Exception as e:
-            return f"خطای ارتباط: {e}"
+            return f"خطای ارتباط با مودم: {e}"
 
         # Poll ussd_info
         url_info = f"{self.base_url}?method=get&module=duster&file=json_ussd_info{int(time.time()*1000)}"
         start_time = time.time()
+        
+        # Wait a moment before first check
+        time.sleep(1.2)
+        
         while time.time() - start_time < timeout_sec:
-            time.sleep(1.5)
             try:
                 res = requests.get(url_info, timeout=self.timeout)
                 if res.status_code == 200:
                     d = res.json()
-                    ussd_type = d.get("ussd_type", "")
+                    ussd_type = str(d.get("ussd_type", ""))
                     ussd_str = d.get("ussd_str", "")
-                    if ussd_str:
+
+                    # If response message exists, decode and return it
+                    if ussd_str and len(ussd_str) > 0:
                         return uni_decode(ussd_str)
-                    if ussd_type in ("0", "1") and not ussd_str:
-                        return "پاسخ خالی از اپراتور دریافت شد."
-            except Exception:
-                pass
+
+                    # Handled states
+                    if ussd_type == "2":
+                        # In Shatel / LTE networks, type 2 without string means network rejected or closed session
+                        return (
+                            f"پاسخ از اپراتور دریافت نشد (نشست توسط شبکه بسته شد).\n"
+                            f"علت: سیم‌کارت شما شاتل موبایل است؛ کدهایی مثل *140*11# مخصوص ایرانسل بوده و در شاتل پشتیبانی نمی‌شوند.\n"
+                            f"لطفاً کد اصلی شاتل موبایل (*1# یا *1*4#) را شماره‌گیری کنید یا از اپلیکیشن «شاتل موبایل من» استفاده فرمایید."
+                        )
+                    elif ussd_type == "3":
+                        return "خطای USSD: کلاینت دیگری به این نشست پاسخ داده است."
+                    elif ussd_type == "4":
+                        return "خطای USSD: این کد دستوری توسط اپراتور پشتیبانی نمی‌شود."
+                    elif ussd_type in ("0", "1") and not ussd_str:
+                        return "درخواست ارسال شد اما اپراتور پاسخی بازنگرداند."
+
+            except Exception as e:
+                print(f"[ModemClient] USSD poll error: {e}")
+
+            time.sleep(1.5)
                 
-        return "زمان انتظار برای پاسخ USSD به پایان رسید."
+        return "زمان انتظار برای پاسخ USSD از سمت شبکه به پایان رسید."
 
     def reboot(self) -> bool:
         """Reboots modem."""
@@ -357,7 +384,6 @@ class ModemClient:
 
 if __name__ == "__main__":
     client = ModemClient()
-    sms_res = client.get_sms_list(page=1, data_per_page=50)
-    print(f"Total messages fetched: {sms_res['total_messages']}, Unread: {sms_res['unread_count']}")
-    for idx, m in enumerate(sms_res["messages"][:5], 1):
-        print(f"{idx}. [{m['storage']}] [{m['time']}] {m['sender']}: {m['text'][:40]}... (Unread: {m['is_unread']})")
+    print("Testing USSD...")
+    res = client.send_ussd("*140*11#")
+    print(res)
