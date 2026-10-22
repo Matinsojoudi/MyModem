@@ -531,26 +531,40 @@ HTML_PAGE = """<!DOCTYPE html>
             <span id="send-status" style="margin-right: 12px; font-size: 13px; font-weight: 600;"></span>
         </div>
 
-        <!-- Tab 3: USSD -->
+        <!-- Tab 3: USSD & Package Inquiry -->
         <div id="tab-ussd" class="tab-content">
-            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">استعلام بسته و شارژ (کدهای USSD)</h3>
-            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
-                سیم‌کارت فعال روی مودم شما <b>شاتل موبایل</b> است؛ از کدهای مخصوص شاتل موبایل استفاده کنید:
-            </p>
-            <div class="ussd-quick">
-                <span class="ussd-chip" onclick="setUSSD('*1#')">✨ *1# (منوی اصلی شاتل)</span>
-                <span class="ussd-chip" onclick="setUSSD('*1*4#')">📊 *1*4# (استعلام مانده بسته شاتل)</span>
-                <span class="ussd-chip" onclick="setUSSD('*1*2#')">🌐 *1*2# (بسته‌های اینترنت)</span>
-                <span class="ussd-chip" onclick="setUSSD('*1000#')">📞 *1000# (خدمات شاتل)</span>
-                <span class="ussd-chip" onclick="setUSSD('*100#')">*100# (همراه اول)</span>
-                <span class="ussd-chip" onclick="setUSSD('*555#')">*555# (ایرانسل)</span>
+            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">استعلام بسته اینترنت و شارژ</h3>
+            
+            <!-- Quick Online Portal Card -->
+            <div style="background: linear-gradient(135deg, rgba(235, 107, 34, 0.15), rgba(255, 152, 0, 0.08)); border: 1px solid rgba(235, 107, 34, 0.35); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                <div>
+                    <div style="font-weight: 700; font-size: 15px; color: #ff9800; margin-bottom: 4px;">🚀 استعلام آنلاین و دقیق از «شاتل موبایل من»</div>
+                    <div style="font-size: 13px; color: var(--text-muted);">مشاهده حجم باقیمانده، تاریخ انقضا و بسته‌های فعال بدون نیاز به کدهای USSD</div>
+                </div>
+                <a href="https://my.shatelmobile.ir" target="_blank" class="btn" style="background: #ff9800; color: #fff; text-decoration: none; font-weight: 600; padding: 8px 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(255,152,0,0.3);">
+                    🌐 ورود به پورتال شاتل موبایل
+                </a>
             </div>
-            <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-                <input type="text" id="ussd-code" placeholder="کد دستوری (مثلاً *1# یا *1*4#)" style="direction: ltr;">
-                <button class="btn btn-primary" onclick="handleUSSD()">شماره‌گیری</button>
+
+            <div style="border-top: 1px solid var(--border); padding-top: 16px;">
+                <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">شماره‌گیری کدهای دستوری (USSD)</h4>
+                <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.6;">
+                    💡 <b>نکته فنی:</b> سیم‌کارت فعال روی مودم <b>شاتل موبایل</b> است. مودم‌های همراه روی بستر 4G LTE کانال صوتی CSFB ندارند؛ در نتیجه ممکن است برخی کدهای USSD توسط دکل شبکه مخابراتی رد یا بسته شوند.
+                </div>
+                
+                <div class="ussd-quick">
+                    <span class="ussd-chip" onclick="setUSSD('*1#')">✨ *1# (منوی اصلی شاتل)</span>
+                    <span class="ussd-chip" onclick="setUSSD('*1*4#')">📊 *1*4# (استعلام مانده بسته شاتل)</span>
+                    <span class="ussd-chip" onclick="setUSSD('*1*2#')">🌐 *1*2# (بسته‌های اینترنت)</span>
+                    <span class="ussd-chip" onclick="setUSSD('*1000#')">📞 *1000# (خدمات شاتل)</span>
+                </div>
+                <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                    <input type="text" id="ussd-code" placeholder="کد دستوری (مثلاً *1# یا *1*4#)" style="direction: ltr;">
+                    <button class="btn btn-primary" onclick="handleUSSD()">شماره‌گیری</button>
+                </div>
+                <label>نتیجه استعلام:</label>
+                <div id="ussd-output">برای مشاهده پاسخ، کد دستوری را وارد کرده و شماره‌گیری کنید.</div>
             </div>
-            <label>نتیجه استعلام:</label>
-            <div id="ussd-output">برای مشاهده پاسخ، کد دستوری را وارد کرده و شماره‌گیری کنید.</div>
         </div>
 
         <!-- Tab 4: Control -->
