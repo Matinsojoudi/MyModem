@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Local Modern Web Dashboard for NWR-945X Modem (Light Theme Edition)
+Local Modern Web Dashboard for NWR-945X Modem (Dark & Dynamic Theme)
 Run on http://127.0.0.1:8080
 Provides:
-- Sleek Apple-style Light Mode UI with glassmorphism
+- Premium Dark Glassmorphism UI (Default) with Instant Light/Dark Theme Switcher
 - SMS Inbox & Outbox reader with Solar/Shamsi (هجری شمسی) dates
 - Auto and manual 'Mark as Read' synchronization with modem
 - SMS Sender
@@ -31,23 +31,56 @@ HTML_PAGE = """<!DOCTYPE html>
     <title>مدیریت هوشمند مودم NWR-945X</title>
     <style>
         :root {
+            /* Default: Dark Theme */
+            --bg: #0b0f19;
+            --bg-gradient: 
+                radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.15) 0px, transparent 50%);
+            --card-bg: rgba(20, 27, 45, 0.72);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(56, 189, 248, 0.35);
+            --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.25);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --danger: #f43f5e;
+            --danger-bg: rgba(244, 63, 94, 0.12);
+            --success: #10b981;
+            --success-bg: rgba(16, 185, 129, 0.12);
+            --warning: #f59e0b;
+            --sms-item-bg: rgba(15, 23, 42, 0.65);
+            --input-bg: rgba(15, 23, 42, 0.85);
+            --tab-bg: rgba(15, 23, 42, 0.7);
+            --tab-active-bg: #38bdf8;
+            --tab-active-color: #0b0f19;
+            --chip-bg: rgba(255, 255, 255, 0.05);
+            --shadow-card: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        body.light-theme {
             --bg: #f8fafc;
-            --card-bg: rgba(255, 255, 255, 0.85);
+            --bg-gradient: 
+                radial-gradient(at 0% 0%, #e0f2fe 0px, transparent 50%),
+                radial-gradient(at 100% 100%, #fae8ff 0px, transparent 50%);
+            --card-bg: rgba(255, 255, 255, 0.88);
             --border: #e2e8f0;
             --border-hover: #cbd5e1;
             --accent: #0284c7;
-            --accent-light: #e0f2fe;
             --accent-glow: rgba(2, 132, 199, 0.16);
             --text-main: #0f172a;
             --text-muted: #64748b;
             --danger: #e11d48;
-            --danger-light: #ffe4e6;
+            --danger-bg: #ffe4e6;
             --success: #059669;
-            --success-light: #d1fae5;
+            --success-bg: #d1fae5;
             --warning: #d97706;
-            --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
-            --shadow-md: 0 4px 20px -2px rgba(0,0,0,0.06), 0 2px 6px -1px rgba(0,0,0,0.03);
-            --shadow-lg: 0 10px 30px -5px rgba(0,0,0,0.08);
+            --sms-item-bg: #ffffff;
+            --input-bg: #ffffff;
+            --tab-bg: rgba(241, 245, 249, 0.85);
+            --tab-active-bg: #ffffff;
+            --tab-active-color: #0284c7;
+            --chip-bg: #f1f5f9;
+            --shadow-card: 0 4px 20px -2px rgba(0,0,0,0.06);
         }
 
         * {
@@ -55,13 +88,12 @@ HTML_PAGE = """<!DOCTYPE html>
             margin: 0;
             padding: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Vazirmatn", Tahoma, sans-serif;
+            transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
         }
 
         body {
             background-color: var(--bg);
-            background-image: 
-                radial-gradient(at 0% 0%, #e0f2fe 0px, transparent 50%),
-                radial-gradient(at 100% 100%, #fae8ff 0px, transparent 50%);
+            background-image: var(--bg-gradient);
             color: var(--text-main);
             min-height: 100vh;
             padding: 24px;
@@ -80,6 +112,8 @@ HTML_PAGE = """<!DOCTYPE html>
             padding-bottom: 24px;
             border-bottom: 1px solid var(--border);
             margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 12px;
         }
 
         .logo-area {
@@ -97,7 +131,6 @@ HTML_PAGE = """<!DOCTYPE html>
             align-items: center;
             justify-content: center;
             font-size: 24px;
-            color: #fff;
             box-shadow: 0 6px 16px var(--accent-glow);
         }
 
@@ -113,6 +146,12 @@ HTML_PAGE = """<!DOCTYPE html>
             margin-top: 2px;
         }
 
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
         /* Status Bar Cards */
         .grid-stats {
             display: grid;
@@ -123,21 +162,19 @@ HTML_PAGE = """<!DOCTYPE html>
 
         .stat-card {
             background: var(--card-bg);
-            backdrop-filter: blur(16px);
+            backdrop-filter: blur(18px);
             border: 1px solid var(--border);
             border-radius: 16px;
             padding: 18px;
             display: flex;
             flex-direction: column;
             gap: 8px;
-            box-shadow: var(--shadow-sm);
-            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            box-shadow: var(--shadow-card);
         }
 
         .stat-card:hover {
             transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
-            border-color: #cbd5e1;
+            border-color: var(--border-hover);
         }
 
         .stat-label {
@@ -159,8 +196,8 @@ HTML_PAGE = """<!DOCTYPE html>
         .tabs {
             display: flex;
             gap: 8px;
-            background: rgba(241, 245, 249, 0.8);
-            backdrop-filter: blur(10px);
+            background: var(--tab-bg);
+            backdrop-filter: blur(12px);
             padding: 6px;
             border-radius: 14px;
             border: 1px solid var(--border);
@@ -177,7 +214,6 @@ HTML_PAGE = """<!DOCTYPE html>
             font-weight: 600;
             border-radius: 10px;
             cursor: pointer;
-            transition: all 0.2s;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -189,21 +225,20 @@ HTML_PAGE = """<!DOCTYPE html>
         }
 
         .tab-btn.active {
-            background: #ffffff;
-            color: var(--accent);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-            border: 1px solid rgba(0, 0, 0, 0.04);
+            background: var(--tab-active-bg);
+            color: var(--tab-active-color);
+            box-shadow: 0 4px 12px var(--accent-glow);
         }
 
         /* Content Sections */
         .tab-content {
             display: none;
             background: var(--card-bg);
-            backdrop-filter: blur(16px);
+            backdrop-filter: blur(18px);
             border: 1px solid var(--border);
             border-radius: 20px;
             padding: 24px;
-            box-shadow: var(--shadow-md);
+            box-shadow: var(--shadow-card);
         }
 
         .tab-content.active {
@@ -221,29 +256,26 @@ HTML_PAGE = """<!DOCTYPE html>
             padding: 18px;
             border-radius: 14px;
             border: 1px solid var(--border);
-            background: #ffffff;
+            background: var(--sms-item-bg);
             margin-bottom: 12px;
             display: flex;
             flex-direction: column;
             gap: 10px;
-            box-shadow: var(--shadow-sm);
-            transition: border-color 0.2s, box-shadow 0.2s;
             position: relative;
         }
 
         .sms-item:hover {
-            border-color: #94a3b8;
-            box-shadow: var(--shadow-md);
+            border-color: var(--border-hover);
         }
 
         .sms-item.unread {
             border-right: 4px solid var(--accent);
-            background: #f0f9ff;
+            background: rgba(56, 189, 248, 0.08);
         }
 
         .sms-item.missed-call {
             border-right: 4px solid var(--danger);
-            background: #fff1f2;
+            background: var(--danger-bg);
         }
 
         .sms-header {
@@ -276,17 +308,17 @@ HTML_PAGE = """<!DOCTYPE html>
         }
 
         .badge-call {
-            background: var(--danger-light);
+            background: var(--danger-bg);
             color: var(--danger);
         }
 
         .badge-sms {
-            background: var(--accent-light);
+            background: rgba(56, 189, 248, 0.16);
             color: var(--accent);
         }
 
         .badge-unread {
-            background: var(--success-light);
+            background: var(--success-bg);
             color: var(--success);
         }
 
@@ -299,7 +331,7 @@ HTML_PAGE = """<!DOCTYPE html>
         .sms-body {
             font-size: 14px;
             line-height: 1.6;
-            color: #334155;
+            color: var(--text-main);
             white-space: pre-wrap;
             word-break: break-word;
         }
@@ -310,7 +342,7 @@ HTML_PAGE = """<!DOCTYPE html>
             gap: 8px;
             margin-top: 4px;
             padding-top: 8px;
-            border-top: 1px dashed #f1f5f9;
+            border-top: 1px dashed var(--border);
         }
 
         /* Buttons & Forms */
@@ -321,7 +353,6 @@ HTML_PAGE = """<!DOCTYPE html>
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
             display: inline-flex;
             align-items: center;
             gap: 6px;
@@ -329,30 +360,29 @@ HTML_PAGE = """<!DOCTYPE html>
 
         .btn-primary {
             background: var(--accent);
-            color: #ffffff;
+            color: #0b0f19;
             box-shadow: 0 4px 12px var(--accent-glow);
         }
 
         .btn-primary:hover {
-            background: #0369a1;
+            opacity: 0.9;
             transform: translateY(-1px);
         }
 
         .btn-secondary {
-            background: #f1f5f9;
-            color: #475569;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
             border: 1px solid var(--border);
         }
 
         .btn-secondary:hover {
-            background: #e2e8f0;
-            color: #0f172a;
+            background: rgba(255, 255, 255, 0.14);
         }
 
         .btn-danger {
-            background: var(--danger-light);
+            background: var(--danger-bg);
             color: var(--danger);
-            border: 1px solid #fecdd3;
+            border: 1px solid rgba(244, 63, 94, 0.3);
         }
 
         .btn-danger:hover {
@@ -376,13 +406,11 @@ HTML_PAGE = """<!DOCTYPE html>
             width: 100%;
             padding: 12px 14px;
             border-radius: 10px;
-            background: #ffffff;
+            background: var(--input-bg);
             border: 1px solid var(--border);
             color: var(--text-main);
             font-size: 14px;
             outline: none;
-            box-shadow: inset 0 1px 2px rgba(0,0,0,0.03);
-            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         input:focus, textarea:focus {
@@ -398,25 +426,23 @@ HTML_PAGE = """<!DOCTYPE html>
         }
 
         .ussd-chip {
-            background: #f1f5f9;
+            background: var(--chip-bg);
             border: 1px solid var(--border);
             padding: 7px 14px;
             border-radius: 8px;
-            color: #334155;
+            color: var(--text-main);
             font-size: 13px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s;
         }
 
         .ussd-chip:hover {
-            background: var(--accent-light);
-            border-color: #bae6fd;
+            border-color: var(--accent);
             color: var(--accent);
         }
 
         #ussd-output {
-            background: #f8fafc;
+            background: var(--input-bg);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 16px;
@@ -424,7 +450,7 @@ HTML_PAGE = """<!DOCTYPE html>
             font-size: 14px;
             line-height: 1.6;
             white-space: pre-wrap;
-            color: #334155;
+            color: var(--text-main);
         }
     </style>
 </head>
@@ -438,7 +464,10 @@ HTML_PAGE = """<!DOCTYPE html>
                     <div class="subtitle">پنل مدیریت هوشمند پیامک‌ها، تاریخ شمسی و وضعیت باتری</div>
                 </div>
             </div>
-            <div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" id="theme-toggle-btn" onclick="toggleTheme()">
+                    🌙 تم تاریک
+                </button>
                 <button class="btn btn-primary" onclick="refreshStatus()">🔄 بروزرسانی</button>
             </div>
         </header>
@@ -533,6 +562,29 @@ HTML_PAGE = """<!DOCTYPE html>
     </div>
 
     <script>
+        // Theme Management (Default is Dark)
+        function initTheme() {
+            const savedTheme = localStorage.getItem('modem_theme') || 'dark';
+            if (savedTheme === 'light') {
+                document.body.classList.add('light-theme');
+                document.getElementById('theme-toggle-btn').innerText = '☀️ تم روشن';
+            } else {
+                document.body.classList.remove('light-theme');
+                document.getElementById('theme-toggle-btn').innerText = '🌙 تم تاریک';
+            }
+        }
+
+        function toggleTheme() {
+            const isLight = document.body.classList.toggle('light-theme');
+            if (isLight) {
+                localStorage.setItem('modem_theme', 'light');
+                document.getElementById('theme-toggle-btn').innerText = '☀️ تم روشن';
+            } else {
+                localStorage.setItem('modem_theme', 'dark');
+                document.getElementById('theme-toggle-btn').innerText = '🌙 تم تاریک';
+            }
+        }
+
         function switchTab(tab) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -726,6 +778,7 @@ HTML_PAGE = """<!DOCTYPE html>
         }
 
         // Init
+        initTheme();
         refreshStatus();
         loadSMS();
         setInterval(refreshStatus, 15000);
