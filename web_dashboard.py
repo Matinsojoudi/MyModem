@@ -4,7 +4,8 @@
 Local Modern Web Dashboard for NWR-945X Modem
 Run on http://127.0.0.1:8080
 Provides:
-- SMS Inbox & Outbox reader
+- SMS Inbox & Outbox reader with Solar/Shamsi (هجری شمسی) dates
+- Auto and manual 'Mark as Read' synchronization with modem
 - SMS Sender
 - Missed Call Monitor
 - USSD Dialing
@@ -204,7 +205,13 @@ HTML_PAGE = """<!DOCTYPE html>
             display: flex;
             flex-direction: column;
             gap: 8px;
-            transition: border-color 0.2s;
+            transition: border-color 0.2s, background-color 0.2s;
+            position: relative;
+        }
+
+        .sms-item.unread {
+            border-right: 4px solid var(--accent);
+            background: rgba(56, 189, 248, 0.08);
         }
 
         .sms-item:hover {
@@ -213,13 +220,15 @@ HTML_PAGE = """<!DOCTYPE html>
 
         .sms-item.missed-call {
             border-right: 4px solid var(--danger);
-            background: rgba(244, 63, 94, 0.05);
+            background: rgba(244, 63, 94, 0.07);
         }
 
         .sms-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
         }
 
         .sender-tag {
@@ -228,6 +237,12 @@ HTML_PAGE = """<!DOCTYPE html>
             font-size: 15px;
             direction: ltr;
             text-align: right;
+        }
+
+        .badges-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .badge {
@@ -247,10 +262,15 @@ HTML_PAGE = """<!DOCTYPE html>
             color: #7dd3fc;
         }
 
+        .badge-unread {
+            background: rgba(16, 185, 129, 0.2);
+            color: #6ee7b7;
+        }
+
         .sms-time {
             font-size: 12px;
             color: var(--text-muted);
-            direction: ltr;
+            direction: rtl;
         }
 
         .sms-body {
@@ -265,7 +285,7 @@ HTML_PAGE = """<!DOCTYPE html>
             display: flex;
             justify-content: flex-end;
             gap: 8px;
-            margin-top: 4px;
+            margin-top: 6px;
         }
 
         /* Buttons & Forms */
@@ -290,6 +310,17 @@ HTML_PAGE = """<!DOCTYPE html>
         .btn-primary:hover {
             opacity: 0.9;
             transform: scale(0.98);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #cbd5e1;
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
         }
 
         .btn-danger {
@@ -374,7 +405,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 <div class="logo-badge">📶</div>
                 <div>
                     <h1>مودم شارژی NWR-945X</h1>
-                    <div class="subtitle">پنل مدیریت هوشمند پیامک‌ها، تماس‌ها و وضعیت باتری</div>
+                    <div class="subtitle">پنل مدیریت هوشمند پیامک‌ها، تاریخ شمسی و وضعیت باتری</div>
                 </div>
             </div>
             <div>
@@ -412,9 +443,16 @@ HTML_PAGE = """<!DOCTYPE html>
 
         <!-- Tab 1: Inbox & Missed Calls -->
         <div id="tab-inbox" class="tab-content active">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h3 style="font-size: 16px;">صندوق پیامک‌های دریافتی</h3>
-                <span id="unread-count-badge" class="badge badge-sms">۰ خوانده‌نشده</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <h3 style="font-size: 16px;">صندوق پیامک‌های دریافتی</h3>
+                    <span id="unread-count-badge" class="badge badge-sms">۰ خوانده‌نشده</span>
+                </div>
+                <div>
+                    <button class="btn btn-secondary" onclick="markAllAsRead()" style="font-size: 12px; padding: 6px 12px;">
+                        ✓ خواندن همه در مودم
+                    </button>
+                </div>
             </div>
             <div id="sms-container">در حال دریافت پیامک‌ها...</div>
         </div>
@@ -503,21 +541,33 @@ HTML_PAGE = """<!DOCTYPE html>
                 let html = '';
                 list.forEach(m => {
                     const isCall = m.is_missed_call;
-                    const badge = isCall ? '<span class="badge badge-call">📞 تماس بی‌پاسخ</span>' : '<span class="badge badge-sms">💬 پیامک</span>';
-                    const callClass = isCall ? 'missed-call' : '';
+                    const isUnread = m.is_unread;
+                    
+                    let badgeCall = isCall ? '<span class="badge badge-call">📞 تماس بی‌پاسخ</span>' : '<span class="badge badge-sms">💬 پیامک</span>';
+                    let badgeUnread = isUnread ? '<span class="badge badge-unread" id="badge-unread-' + m.id.replace(/,/g, '') + '">جدید / خوانده‌نشده</span>' : '';
+                    let itemClass = 'sms-item ' + (isCall ? 'missed-call ' : '') + (isUnread ? 'unread ' : '');
+                    
+                    let markReadBtn = isUnread ? `
+                        <button class="btn btn-secondary" id="btn-read-${m.id.replace(/,/g, '')}" onclick="markAsRead('${m.id}')" style="padding:4px 10px; font-size:12px;">
+                            ✓ علامت خوانده‌شده
+                        </button>
+                    ` : '';
+
                     html += `
-                        <div class="sms-item ${callClass}">
+                        <div class="${itemClass}" id="sms-card-${m.id.replace(/,/g, '')}" onclick="autoMarkReadOnView('${m.id}', ${isUnread})">
                             <div class="sms-header">
-                                <div style="display:flex; align-items:center; gap:8px;">
-                                    ${badge}
+                                <div class="badges-wrap">
+                                    ${badgeCall}
+                                    ${badgeUnread}
                                     <span class="sender-tag">${m.sender}</span>
                                 </div>
-                                <span class="sms-time">${m.time}</span>
+                                <span class="sms-time">📅 ${m.time}</span>
                             </div>
                             <div class="sms-body">${m.text}</div>
                             <div class="sms-actions">
-                                <button class="btn btn-primary" onclick="replySMS('${m.sender}')" style="padding:4px 10px; font-size:12px;">پاسخ</button>
-                                <button class="btn btn-danger" onclick="deleteSMS('${m.id}')" style="padding:4px 10px; font-size:12px;">حذف</button>
+                                ${markReadBtn}
+                                <button class="btn btn-primary" onclick="event.stopPropagation(); replySMS('${m.sender}')" style="padding:4px 10px; font-size:12px;">پاسخ</button>
+                                <button class="btn btn-danger" onclick="event.stopPropagation(); deleteSMS('${m.id}')" style="padding:4px 10px; font-size:12px;">حذف</button>
                             </div>
                         </div>
                     `;
@@ -525,6 +575,42 @@ HTML_PAGE = """<!DOCTYPE html>
                 container.innerHTML = html;
             } catch (e) {
                 container.innerHTML = '<div style="color:var(--danger); padding:20px;">خطا در دریافت پیامک‌ها. اتصال به مودم را بررسی کنید.</div>';
+            }
+        }
+
+        async function autoMarkReadOnView(id, isUnread) {
+            if (isUnread) {
+                await markAsRead(id);
+            }
+        }
+
+        async function markAsRead(id) {
+            try {
+                const res = await fetch('/api/mark_read', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id})
+                });
+                const cleanId = id.replace(/,/g, '');
+                const card = document.getElementById('sms-card-' + cleanId);
+                const badge = document.getElementById('badge-unread-' + cleanId);
+                const btn = document.getElementById('btn-read-' + cleanId);
+                if (card) card.classList.remove('unread');
+                if (badge) badge.remove();
+                if (btn) btn.remove();
+                refreshStatus();
+            } catch (e) {
+                console.error('Error marking as read:', e);
+            }
+        }
+
+        async function markAllAsRead() {
+            try {
+                await fetch('/api/mark_all_read', {method: 'POST'});
+                loadSMS();
+                refreshStatus();
+            } catch (e) {
+                console.error(e);
             }
         }
 
@@ -661,6 +747,23 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             self.send_json({"success": success})
             return
 
+        elif path == "/api/mark_read":
+            msg_id = payload.get("id", "")
+            success = client.mark_sms_as_read(msg_id)
+            self.send_json({"success": success})
+            return
+
+        elif path == "/api/mark_all_read":
+            sms_data = client.get_sms_list(page=1, data_per_page=50)
+            messages = sms_data.get("messages", [])
+            count = 0
+            for m in messages:
+                if m.get("is_unread"):
+                    if client.mark_sms_as_read(m.get("id")):
+                        count += 1
+            self.send_json({"success": True, "marked_count": count})
+            return
+
         elif path == "/api/ussd":
             code = payload.get("code", "")
             result = client.send_ussd(code)
@@ -688,7 +791,6 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
     def log_message(self, format, *args):
-        # Silence default access logging to keep terminal clean
         return
 
 

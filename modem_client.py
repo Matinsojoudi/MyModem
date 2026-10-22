@@ -4,7 +4,8 @@
 Core API Client for NWR-945X 4G Portable Wi-Fi Modem
 Provides methods for:
 - Modem status & battery telemetry
-- SMS reading, decoding, sending, and deleting
+- SMS reading, decoding, sending, deleting, and marking as read
+- Solar/Jalali (هجری شمسی) date conversion in Iran/Tehran time
 - Missed call detection
 - USSD code dialing
 - Device reboot
@@ -13,11 +14,69 @@ Provides methods for:
 import requests
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
 MODEM_IP = "192.168.1.1"
 BASE_URL = f"http://{MODEM_IP}/xml_action.cgi"
+
+PERSIAN_MONTHS = [
+    "", "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+    "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"
+]
+
+
+def gregorian_to_jalali(gy: int, gm: int, gd: int):
+    """Accurate Gregorian to Jalali (Solar Hijri) date conversion."""
+    g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+    if gy > 1600:
+        jy = 979
+        gy -= 1600
+    else:
+        jy = 0
+        gy -= 621
+    gy2 = gy if gm > 2 else gy - 1
+    days = 365 * gy + int((gy2 + 3) / 4) - int((gy2 + 99) / 100) + int((gy2 + 399) / 400) - 80 + gd + g_d_m[gm - 1]
+    jy += 33 * int(days / 12053)
+    days %= 12053
+    jy += 4 * int(days / 1461)
+    days %= 1461
+    if days > 365:
+        jy += int((days - 1) / 365)
+        days = (days - 1) % 365
+    if days < 186:
+        jm = 1 + int(days / 31)
+        jd = 1 + (days % 31)
+    else:
+        jm = 7 + int((days - 186) / 30)
+        jd = 1 + ((days - 186) % 30)
+    return jy, jm, jd
+
+
+def parse_modem_time_to_shamsi(raw_time: str) -> str:
+    """
+    Parses modem timestamp (e.g. '26,10,03,19,06,11,+3')
+    into Shamsi (Persian) format: '۱۱ مهر ۱۴۰۵ - ۱۹:۰۶'
+    """
+    if not raw_time:
+        return "--"
+    try:
+        parts = [p.strip() for p in raw_time.split(",")]
+        if len(parts) >= 6:
+            gy = 2000 + int(parts[0])
+            gm = int(parts[1])
+            gd = int(parts[2])
+            hour = int(parts[3])
+            minute = int(parts[4])
+            second = int(parts[5])
+
+            # Convert to Jalali
+            jy, jm, jd = gregorian_to_jalali(gy, gm, gd)
+            month_name = PERSIAN_MONTHS[jm]
+            return f"{jd} {month_name} {jy} - ساعت {hour:02d}:{minute:02d}"
+    except Exception:
+        pass
+    return raw_time
 
 
 def uni_decode(hex_str: str) -> str:
@@ -25,7 +84,6 @@ def uni_decode(hex_str: str) -> str:
     if not hex_str:
         return ""
     try:
-        # Strip trailing odd characters if any
         clean_hex = hex_str.strip()
         if len(clean_hex) % 2 != 0:
             clean_hex = clean_hex[:-1]
@@ -45,7 +103,6 @@ def uni_encode(text: str) -> str:
 def get_sms_time_str() -> str:
     """Generates modem time format: YY,MM,DD,HH,MM,SS,+TZ"""
     now = datetime.now()
-    # Modem standard time format
     return now.strftime("%y,%m,%d,%H,%M,%S,+3.5")
 
 
@@ -68,7 +125,7 @@ class ModemClient:
 
     def get_sms_list(self, page: int = 1, data_per_page: int = 20, box: str = "inbox") -> Dict[str, Any]:
         """
-        Fetches and decodes SMS messages from modem.
+        Fetches and decodes SMS messages from modem with Shamsi date formatting.
         box: 'inbox' (received), 'outbox' (sent)
         """
         flag = "GET_RCV_SMS_LOCAL" if box == "inbox" else "GET_SENT_SMS_LOCAL"
@@ -98,8 +155,9 @@ class ModemClient:
                 for item in raw_list:
                     sender = uni_decode(item.get("from", "")).lstrip(";")
                     text = uni_decode(item.get("subject", ""))
-                    recv_time = item.get("received", "")
-                    status = item.get("status", "0")  # 1 = unread, 0 = read
+                    recv_time_raw = item.get("received", "")
+                    recv_time_shamsi = parse_modem_time_to_shamsi(recv_time_raw)
+                    status = str(item.get("status", "0"))  # 1 = unread, 0 = read
                     msg_id = item.get("index", "")
                     
                     # Detect missed call SMS from operator
@@ -107,7 +165,6 @@ class ModemClient:
                     caller_number = ""
                     if "تماس از دست رفته" in text or "تماس ازدست رفته" in text or "missed call" in text.lower():
                         is_missed_call = True
-                        # Try extracting caller phone if present
                         for word in text.split():
                             clean_word = word.strip(".,;:\"'()[]{}")
                             if clean_word.startswith("+98") or (clean_word.startswith("09") and len(clean_word) >= 11):
@@ -118,8 +175,10 @@ class ModemClient:
                         "id": msg_id,
                         "sender": sender,
                         "text": text,
-                        "time": recv_time,
+                        "time": recv_time_shamsi,
+                        "raw_time": recv_time_raw,
                         "is_unread": status == "1",
+                        "status": status,
                         "is_missed_call": is_missed_call,
                         "caller_number": caller_number
                     })
@@ -129,6 +188,32 @@ class ModemClient:
             print(f"[ModemClient] get_sms_list error: {e}")
             
         return result
+
+    def mark_sms_as_read(self, msg_id: str) -> bool:
+        """
+        Marks an SMS as read on the modem hardware.
+        msg_id: e.g. 'LRCV14,LRCV15,' or 'LRCV14'
+        """
+        if not msg_id:
+            return False
+        clean_id = msg_id if msg_id.endswith(",") else f"{msg_id},"
+        
+        url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
+        payload = {
+            "message_flag": "SET_MSG_READ",
+            "sms_cmd": "7",
+            "tags": "12",
+            "mem_store": "1",
+            "read_message_id": clean_id
+        }
+        try:
+            r = requests.post(url, json=payload, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                return str(data.get("sms_cmd_status_result")) == "3"
+        except Exception as e:
+            print(f"[ModemClient] mark_sms_as_read error: {e}")
+        return False
 
     def send_sms(self, phone_number: str, message_text: str) -> bool:
         """Sends an SMS to one or more phone numbers (comma-separated)."""
@@ -154,7 +239,6 @@ class ModemClient:
             r = requests.post(url, json=payload, timeout=self.timeout + 5)
             if r.status_code == 200:
                 data = r.json()
-                # Status result 3 means success
                 return data.get("sms_cmd_status_result") == 3
         except Exception as e:
             print(f"[ModemClient] send_sms error: {e}")
@@ -229,9 +313,6 @@ class ModemClient:
 
 if __name__ == "__main__":
     client = ModemClient()
-    status = client.get_status()
-    print("Modem Status:", status.get("battery_percent", "?") if status else "Offline")
     sms_res = client.get_sms_list(page=1, data_per_page=3)
-    print(f"Total SMS count: {sms_res['total_messages']}")
     for m in sms_res["messages"]:
-        print(f"[{m['time']}] {m['sender']}: {m['text'][:50]}... (Missed Call: {m['is_missed_call']})")
+        print(f"[{m['time']}] {m['sender']}: {m['text'][:50]}... (Unread: {m['is_unread']})")
