@@ -187,10 +187,10 @@ class ModemClient:
             text = uni_decode(item.get("subject", ""))
             recv_time_raw = item.get("received", "")
             recv_time_shamsi = parse_modem_time_to_shamsi(recv_time_raw)
-            status = str(item.get("status", "0"))  # 1 = unread, 0 = read
+            status = str(item.get("status", "1"))  # In this modem: "0" = unread, "1" = read
             msg_id = item.get("index", "")
             
-            is_unread = status == "1"
+            is_unread = (status == "0")
             if is_unread:
                 unread_count += 1
             
@@ -202,8 +202,8 @@ class ModemClient:
                 for word in text.split():
                     clean_word = word.strip(".,;:\"'()[]{}")
                     if clean_word.startswith("+98") or (clean_word.startswith("09") and len(clean_word) >= 11):
-                                caller_number = clean_word
-                                break
+                        caller_number = clean_word
+                        break
 
             storage_type = "SIM" if "SRCV" in msg_id else "دستگاه"
 
@@ -235,13 +235,15 @@ class ModemClient:
         if not msg_id:
             return False
         clean_id = msg_id if msg_id.endswith(",") else f"{msg_id},"
-        mem_store = "0" if "SRCV" in clean_id else "1"
+        is_sim = "SRCV" in clean_id
+        mem_store = "0" if is_sim else "1"
+        tags = "" if is_sim else "12"
         
         url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
         payload = {
             "message_flag": "SET_MSG_READ",
             "sms_cmd": "7",
-            "tags": "12",
+            "tags": tags,
             "mem_store": mem_store,
             "read_message_id": clean_id
         }
@@ -249,23 +251,38 @@ class ModemClient:
             r = requests.post(url, json=payload, timeout=self.timeout)
             if r.status_code == 200:
                 data = r.json()
-                return str(data.get("sms_cmd_status_result")) == "3"
+                return str(data.get("sms_cmd_status_result", "")) == "3"
         except Exception as e:
             print(f"[ModemClient] mark_sms_as_read error: {e}")
         return False
 
+    def mark_all_sms_as_read(self) -> int:
+        """Marks all unread SMS messages as read on the modem."""
+        sms_data = self.get_sms_list(page=1, data_per_page=50)
+        messages = sms_data.get("messages", [])
+        marked = 0
+        for m in messages:
+            if m.get("is_unread"):
+                if self.mark_sms_as_read(m.get("id")):
+                    marked += 1
+        return marked
+
     def delete_sms(self, index_ids: str) -> bool:
         """Deletes SMS by index id(s) (e.g. 'SRCV49,SRCV50,' or 'LRCV14,')."""
+        if not index_ids:
+            return False
         if not index_ids.endswith(","):
             index_ids += ","
             
-        mem_store = "0" if "SRCV" in index_ids else "1"
+        is_sim = "SRCV" in index_ids
+        mem_store = "0" if is_sim else "1"
+        tags = "" if is_sim else "12"
         
         url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
         payload = {
             "message_flag": "DELETE_SMS",
             "sms_cmd": "6",
-            "tags": "12",
+            "tags": tags,
             "mem_store": mem_store,
             "delete_message_id": index_ids
         }
@@ -274,10 +291,41 @@ class ModemClient:
             r = requests.post(url, json=payload, timeout=self.timeout)
             if r.status_code == 200:
                 data = r.json()
-                return data.get("sms_cmd_status_result") == 3
+                return str(data.get("sms_cmd_status_result", "")) == "3"
         except Exception as e:
             print(f"[ModemClient] delete_sms error: {e}")
         return False
+
+    def delete_all_sms(self) -> int:
+        """Deletes all SMS messages from SIM and Device storage."""
+        sms_data = self.get_sms_list(page=1, data_per_page=50)
+        messages = sms_data.get("messages", [])
+        if not messages:
+            return 0
+
+        sim_ids = []
+        dev_ids = []
+        for m in messages:
+            mid = m.get("id", "")
+            if not mid:
+                continue
+            if not mid.endswith(","):
+                mid += ","
+            if "SRCV" in mid:
+                sim_ids.append(mid)
+            else:
+                dev_ids.append(mid)
+
+        deleted = 0
+        if sim_ids:
+            joined_sim = "".join(sim_ids)
+            if self.delete_sms(joined_sim):
+                deleted += len(sim_ids)
+        if dev_ids:
+            joined_dev = "".join(dev_ids)
+            if self.delete_sms(joined_dev):
+                deleted += len(dev_ids)
+        return deleted
 
     def send_sms(self, phone_number: str, message_text: str) -> bool:
         """Sends an SMS to one or more phone numbers (comma-separated)."""

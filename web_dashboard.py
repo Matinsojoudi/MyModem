@@ -537,9 +537,12 @@ HTML_PAGE = """<!DOCTYPE html>
                     <h3 style="font-size: 16px; font-weight: 700;">صندوق پیامک‌های دریافتی</h3>
                     <span id="unread-count-badge" class="badge badge-sms">۰ خوانده‌نشده</span>
                 </div>
-                <div>
-                    <button class="btn btn-secondary" onclick="markAllAsRead()" style="font-size: 12px; padding: 7px 14px;">
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-secondary" id="btn-mark-all" onclick="markAllAsRead()" style="font-size: 12px; padding: 7px 14px;">
                          خواندن همه در مودم
+                    </button>
+                    <button class="btn btn-danger" id="btn-delete-all" onclick="deleteAllSMS()" style="font-size: 12px; padding: 7px 14px;">
+                         حذف همه پیام‌ها
                     </button>
                 </div>
             </div>
@@ -677,6 +680,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 const res = await fetch('/api/sms');
                 const data = await res.json();
                 const list = data.messages || [];
+                if (data.unread_count !== undefined) {
+                    const badge = document.getElementById('unread-count-badge');
+                    if (badge) badge.innerText = data.unread_count + ' خوانده‌نشده';
+                }
                 if (list.length === 0) {
                     container.innerHTML = '<div style="padding:24px; text-align:center; color:var(--text-muted);">پیامکی موجود نیست.</div>';
                     return;
@@ -748,12 +755,53 @@ HTML_PAGE = """<!DOCTYPE html>
         }
 
         async function markAllAsRead() {
+            const btn = document.getElementById('btn-mark-all');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = 'در حال پردازش...';
+            }
             try {
-                await fetch('/api/mark_all_read', {method: 'POST'});
-                loadSMS();
-                refreshStatus();
+                const res = await fetch('/api/mark_all_read', {method: 'POST'});
+                const data = await res.json();
+                await loadSMS();
+                await refreshStatus();
             } catch (e) {
                 console.error(e);
+                alert('خطا در علامت‌گذاری پیام‌ها');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = 'خواندن همه در مودم';
+                }
+            }
+        }
+
+        async function deleteAllSMS() {
+            if (!confirm('آیا مطمئن هستید که می‌خواهید تمام پیامک‌های صندوق ورودی را از حافظه مودم حذف کنید؟\nاین عملیات غیرقابل بازگشت است.')) {
+                return;
+            }
+            const btn = document.getElementById('btn-delete-all');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = 'در حال حذف...';
+            }
+            try {
+                const res = await fetch('/api/delete_all_sms', {method: 'POST'});
+                const data = await res.json();
+                if (data.success) {
+                    await loadSMS();
+                    await refreshStatus();
+                } else {
+                    alert('خطا در حذف پیامک‌ها از مودم');
+                }
+            } catch (e) {
+                console.error(e);
+                alert('خطا در ارتباط با سرور');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = 'حذف همه پیام‌ها';
+                }
             }
         }
 
@@ -920,14 +968,13 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             return
 
         elif path == "/api/mark_all_read":
-            sms_data = client.get_sms_list(page=1, data_per_page=50)
-            messages = sms_data.get("messages", [])
-            count = 0
-            for m in messages:
-                if m.get("is_unread"):
-                    if client.mark_sms_as_read(m.get("id")):
-                        count += 1
+            count = client.mark_all_sms_as_read()
             self.send_json({"success": True, "marked_count": count})
+            return
+
+        elif path == "/api/delete_all_sms":
+            count = client.delete_all_sms()
+            self.send_json({"success": True, "deleted_count": count})
             return
 
         elif path == "/api/ussd":
