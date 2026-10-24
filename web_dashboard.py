@@ -15,6 +15,7 @@ import socketserver
 import json
 import urllib.parse
 import http.cookies
+import os
 from modem_client import ModemClient
 from auth_manager import auth_manager
 
@@ -26,11 +27,43 @@ LOGIN_PAGE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ورود امن به پنل مدیریت مودم</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 400;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-Regular.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-Medium.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 600;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-SemiBold.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 700;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-Bold.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 800;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-Black.ttf') format('truetype');
+        }
+
         :root {
             --bg-base: #0b0f19;
             --bg-surface: rgba(22, 30, 49, 0.85);
@@ -129,11 +162,43 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>مدیریت پیام‌ها و مودم همراه</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 400;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-Regular.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-Medium.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 600;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-SemiBold.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 700;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-Bold.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Vazirmatn';
+            font-style: normal;
+            font-weight: 800;
+            font-display: swap;
+            src: url('/static/fonts/Vazirmatn-Black.ttf') format('truetype');
+        }
+
         :root {
             --bg-base: #0b0f19;
             --bg-surface: rgba(22, 30, 49, 0.75);
@@ -2272,6 +2337,29 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         url_parsed = urllib.parse.urlparse(self.path)
         path = url_parsed.path
+
+        # Serve static font files locally without authentication
+        if path.startswith("/static/fonts/"):
+            filename = os.path.basename(path)
+            font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "fonts", filename)
+            if os.path.exists(font_path) and os.path.isfile(font_path):
+                try:
+                    with open(font_path, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "font/ttf")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                except Exception as e:
+                    self.send_error(500, f"Error reading font: {e}")
+                    return
+            else:
+                self.send_error(404, "Font Not Found")
+                return
 
         session_id = self.get_session_token()
         is_authed = auth_manager.is_valid_session(session_id)
