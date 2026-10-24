@@ -452,13 +452,36 @@ HTML_PAGE = """<!DOCTYPE html>
             white-space: pre-wrap;
             color: var(--text-main);
         }
+
+        /* Signal Bars */
+        .signal-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 4px;
+            height: 32px;
+            margin-top: 4px;
+        }
+        .signal-bars .bar {
+            width: 8px;
+            border-radius: 3px 3px 0 0;
+            background: var(--border);
+            transition: background 0.4s ease, height 0.4s ease;
+        }
+        .signal-bars .bar:nth-child(1) { height: 20%; }
+        .signal-bars .bar:nth-child(2) { height: 40%; }
+        .signal-bars .bar:nth-child(3) { height: 60%; }
+        .signal-bars .bar:nth-child(4) { height: 80%; }
+        .signal-bars .bar:nth-child(5) { height: 100%; }
+        .signal-bars .bar.active { background: var(--success); }
+        .signal-bars .bar.weak    { background: var(--danger); }
+        .signal-bars .bar.medium  { background: var(--warning); }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <div class="logo-area">
-                <div class="logo-badge">📶</div>
+                <div class="logo-badge"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="10" width="18" height="10" rx="2" stroke="white" stroke-width="1.8"/><path d="M8 10V8a4 4 0 018 0v2" stroke="white" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="15" r="1.5" fill="white"/><path d="M9.5 13a3.5 3.5 0 015 0" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg></div>
                 <div>
                     <h1>مودم شارژی NWR-945X</h1>
                     <div class="subtitle">پنل مدیریت هوشمند پیامک‌ها، تاریخ شمسی و وضعیت باتری</div>
@@ -466,38 +489,45 @@ HTML_PAGE = """<!DOCTYPE html>
             </div>
             <div class="header-actions">
                 <button class="btn btn-secondary" id="theme-toggle-btn" onclick="toggleTheme()">
-                    🌙 تم تاریک
+                     تم تاریک
                 </button>
-                <button class="btn btn-primary" onclick="refreshStatus()">🔄 بروزرسانی</button>
+                <button class="btn btn-primary" onclick="refreshStatus()"> بروزرسانی</button>
             </div>
         </header>
 
         <!-- Stats Bar -->
         <div class="grid-stats">
             <div class="stat-card">
-                <div class="stat-label">🔋 درصد شارژ باتری</div>
+                <div class="stat-label"> درصد شارژ باتری</div>
                 <div class="stat-val" id="stat-battery">--%</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">⚡ وضعیت شارژر</div>
+                <div class="stat-label"> وضعیت شارژر</div>
                 <div class="stat-val" id="stat-charging">--</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">👥 دستگاه‌های متصل</div>
+                <div class="stat-label"> دستگاه‌های متصل</div>
                 <div class="stat-val" id="stat-clients">--</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">📶 کیفیت آنتن</div>
-                <div class="stat-val" id="stat-signal">-- / ۵</div>
+                <div class="stat-label">کیفیت آنتن</div>
+                <div id="stat-signal-bars" class="signal-bars">
+                    <div class="bar" id="bar1"></div>
+                    <div class="bar" id="bar2"></div>
+                    <div class="bar" id="bar3"></div>
+                    <div class="bar" id="bar4"></div>
+                    <div class="bar" id="bar5"></div>
+                </div>
+                <div class="stat-val" id="stat-signal" style="font-size:14px; margin-top:4px;">--</div>
             </div>
         </div>
 
         <!-- Navigation Tabs -->
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('inbox')">📥 پیامک‌ها و تماس‌ها</button>
-            <button class="tab-btn" onclick="switchTab('send')">✏️ ارسال پیامک جدید</button>
-            <button class="tab-btn" onclick="switchTab('ussd')">🔢 کدهای دستوری (USSD)</button>
-            <button class="tab-btn" onclick="switchTab('control')">⚙️ کنترل مودم</button>
+            <button class="tab-btn active" onclick="switchTab('inbox')"> پیامک‌ها و تماس‌ها</button>
+            <button class="tab-btn" onclick="switchTab('send')"> ارسال پیامک جدید</button>
+            <button class="tab-btn" onclick="switchTab('ussd')"> کدهای دستوری (USSD)</button>
+            <button class="tab-btn" onclick="switchTab('control')"> کنترل مودم</button>
         </div>
 
         <!-- Tab 1: Inbox & Missed Calls -->
@@ -509,7 +539,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 </div>
                 <div>
                     <button class="btn btn-secondary" onclick="markAllAsRead()" style="font-size: 12px; padding: 7px 14px;">
-                        ✓ خواندن همه در مودم
+                         خواندن همه در مودم
                     </button>
                 </div>
             </div>
@@ -527,7 +557,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 <label>متن پیامک</label>
                 <textarea id="send-text" rows="4" placeholder="متن پیامک را اینجا بنویسید..."></textarea>
             </div>
-            <button class="btn btn-primary" id="btn-send-sms" onclick="handleSendSMS()">📤 ارسال پیامک</button>
+            <button class="btn btn-primary" id="btn-send-sms" onclick="handleSendSMS()"> ارسال پیامک</button>
             <span id="send-status" style="margin-right: 12px; font-size: 13px; font-weight: 600;"></span>
         </div>
 
@@ -538,25 +568,25 @@ HTML_PAGE = """<!DOCTYPE html>
             <!-- Quick Online Portal Card -->
             <div style="background: linear-gradient(135deg, rgba(235, 107, 34, 0.15), rgba(255, 152, 0, 0.08)); border: 1px solid rgba(235, 107, 34, 0.35); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
                 <div>
-                    <div style="font-weight: 700; font-size: 15px; color: #ff9800; margin-bottom: 4px;">🚀 استعلام آنلاین و دقیق از «شاتل موبایل من»</div>
+                    <div style="font-weight: 700; font-size: 15px; color: #ff9800; margin-bottom: 4px;"> استعلام آنلاین و دقیق از «شاتل موبایل من»</div>
                     <div style="font-size: 13px; color: var(--text-muted);">مشاهده حجم باقیمانده، تاریخ انقضا و بسته‌های فعال بدون نیاز به کدهای USSD</div>
                 </div>
                 <a href="https://my.shatelmobile.ir" target="_blank" class="btn" style="background: #ff9800; color: #fff; text-decoration: none; font-weight: 600; padding: 8px 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(255,152,0,0.3);">
-                    🌐 ورود به پورتال شاتل موبایل
+                     ورود به پورتال شاتل موبایل
                 </a>
             </div>
 
             <div style="border-top: 1px solid var(--border); padding-top: 16px;">
                 <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">شماره‌گیری کدهای دستوری (USSD)</h4>
                 <div style="background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.6;">
-                    💡 <b>نکته فنی:</b> سیم‌کارت فعال روی مودم <b>شاتل موبایل</b> است. مودم‌های همراه روی بستر 4G LTE کانال صوتی CSFB ندارند؛ در نتیجه ممکن است برخی کدهای USSD توسط دکل شبکه مخابراتی رد یا بسته شوند.
+                     <b>نکته فنی:</b> سیم‌کارت فعال روی مودم <b>شاتل موبایل</b> است. مودم‌های همراه روی بستر 4G LTE کانال صوتی CSFB ندارند؛ در نتیجه ممکن است برخی کدهای USSD توسط دکل شبکه مخابراتی رد یا بسته شوند.
                 </div>
                 
                 <div class="ussd-quick">
-                    <span class="ussd-chip" onclick="setUSSD('*1#')">✨ *1# (منوی اصلی شاتل)</span>
-                    <span class="ussd-chip" onclick="setUSSD('*1*4#')">📊 *1*4# (استعلام مانده بسته شاتل)</span>
-                    <span class="ussd-chip" onclick="setUSSD('*1*2#')">🌐 *1*2# (بسته‌های اینترنت)</span>
-                    <span class="ussd-chip" onclick="setUSSD('*1000#')">📞 *1000# (خدمات شاتل)</span>
+                    <span class="ussd-chip" onclick="setUSSD('*1#')"> *1# (منوی اصلی شاتل)</span>
+                    <span class="ussd-chip" onclick="setUSSD('*1*4#')"> *1*4# (استعلام مانده بسته شاتل)</span>
+                    <span class="ussd-chip" onclick="setUSSD('*1*2#')"> *1*2# (بسته‌های اینترنت)</span>
+                    <span class="ussd-chip" onclick="setUSSD('*1000#')"> *1000# (خدمات شاتل)</span>
                 </div>
                 <div style="display: flex; gap: 8px; margin-bottom: 16px;">
                     <input type="text" id="ussd-code" placeholder="کد دستوری (مثلاً *1# یا *1*4#)" style="direction: ltr;">
@@ -574,8 +604,8 @@ HTML_PAGE = """<!DOCTYPE html>
                 از این قسمت می‌توانید مودم را ری‌استارت کرده یا مستقیماً به صفحه تنظیمات داخلی آن دسترسی پیدا کنید.
             </p>
             <div style="display: flex; gap: 12px;">
-                <button class="btn btn-danger" onclick="handleReboot()">🔄 ری‌استارت کردن مودم</button>
-                <a href="http://192.168.1.1" target="_blank" class="btn btn-primary" style="text-decoration: none;">🌐 باز کردن پنل اصلی مودم</a>
+                <button class="btn btn-danger" onclick="handleReboot()"> ری‌استارت کردن مودم</button>
+                <a href="http://192.168.1.1" target="_blank" class="btn btn-primary" style="text-decoration: none;"> باز کردن پنل اصلی مودم</a>
             </div>
         </div>
     </div>
@@ -586,10 +616,10 @@ HTML_PAGE = """<!DOCTYPE html>
             const savedTheme = localStorage.getItem('modem_theme') || 'dark';
             if (savedTheme === 'light') {
                 document.body.classList.add('light-theme');
-                document.getElementById('theme-toggle-btn').innerText = '☀️ تم روشن';
+                document.getElementById('theme-toggle-btn').innerText = ' تم روشن';
             } else {
                 document.body.classList.remove('light-theme');
-                document.getElementById('theme-toggle-btn').innerText = '🌙 تم تاریک';
+                document.getElementById('theme-toggle-btn').innerText = ' تم تاریک';
             }
         }
 
@@ -597,10 +627,10 @@ HTML_PAGE = """<!DOCTYPE html>
             const isLight = document.body.classList.toggle('light-theme');
             if (isLight) {
                 localStorage.setItem('modem_theme', 'light');
-                document.getElementById('theme-toggle-btn').innerText = '☀️ تم روشن';
+                document.getElementById('theme-toggle-btn').innerText = ' تم روشن';
             } else {
                 localStorage.setItem('modem_theme', 'dark');
-                document.getElementById('theme-toggle-btn').innerText = '🌙 تم تاریک';
+                document.getElementById('theme-toggle-btn').innerText = ' تم تاریک';
             }
         }
 
@@ -618,9 +648,21 @@ HTML_PAGE = """<!DOCTYPE html>
                 const data = await res.json();
                 if (data) {
                     document.getElementById('stat-battery').innerText = (data.battery_percent || '0') + '%';
-                    document.getElementById('stat-charging').innerText = (data.battery_charging === '1') ? 'متصل به شارژر ⚡' : 'درحال مصرف باتری';
+                    document.getElementById('stat-charging').innerText = (data.battery_charging === '1') ? 'در حال شارژ' : 'مصرف باتری';
                     document.getElementById('stat-clients').innerText = data.wifi_clients_num || '0';
-                    document.getElementById('stat-signal').innerText = (data.signal_quality || '0') + ' / ۵';
+                    const sq = parseInt(data.signal_quality || '0');
+                    const signalTexts = ['', 'ضعیف', 'ضعیف', 'متوسط', 'خوب', 'عالی'];
+                    document.getElementById('stat-signal').innerText = signalTexts[sq] || '--';
+                    for (let i = 1; i <= 5; i++) {
+                        const bar = document.getElementById('bar' + i);
+                        if (!bar) continue;
+                        bar.classList.remove('active', 'weak', 'medium');
+                        if (i <= sq) {
+                            if (sq <= 2) bar.classList.add('weak');
+                            else if (sq <= 3) bar.classList.add('medium');
+                            else bar.classList.add('active');
+                        }
+                    }
                     document.getElementById('unread-count-badge').innerText = (data.unread_long || '0') + ' خوانده‌نشده';
                 }
             } catch (e) {
@@ -644,13 +686,13 @@ HTML_PAGE = """<!DOCTYPE html>
                     const isCall = m.is_missed_call;
                     const isUnread = m.is_unread;
                     
-                    let badgeCall = isCall ? '<span class="badge badge-call">📞 تماس بی‌پاسخ</span>' : '<span class="badge badge-sms">💬 پیامک</span>';
+                    let badgeCall = isCall ? '<span class="badge badge-call"> تماس بی‌پاسخ</span>' : '<span class="badge badge-sms"> پیامک</span>';
                     let badgeUnread = isUnread ? '<span class="badge badge-unread" id="badge-unread-' + m.id.replace(/,/g, '') + '">جدید / خوانده‌نشده</span>' : '';
                     let itemClass = 'sms-item ' + (isCall ? 'missed-call ' : '') + (isUnread ? 'unread ' : '');
                     
                     let markReadBtn = isUnread ? `
                         <button class="btn btn-secondary" id="btn-read-${m.id.replace(/,/g, '')}" onclick="markAsRead('${m.id}')" style="padding:4px 10px; font-size:12px;">
-                            ✓ علامت خوانده‌شده
+                             علامت خوانده‌شده
                         </button>
                     ` : '';
 
@@ -662,7 +704,7 @@ HTML_PAGE = """<!DOCTYPE html>
                                     ${badgeUnread}
                                     <span class="sender-tag">${m.sender}</span>
                                 </div>
-                                <span class="sms-time">📅 ${m.time}</span>
+                                <span class="sms-time"> ${m.time}</span>
                             </div>
                             <div class="sms-body">${m.text}</div>
                             <div class="sms-actions">
@@ -740,15 +782,15 @@ HTML_PAGE = """<!DOCTYPE html>
                 });
                 const data = await res.json();
                 if (data.success) {
-                    statusEl.innerText = '✅ با موفقیت ارسال شد.';
+                    statusEl.innerText = ' با موفقیت ارسال شد.';
                     statusEl.style.color = 'var(--success)';
                     document.getElementById('send-text').value = '';
                 } else {
-                    statusEl.innerText = '❌ خطا در ارسال پیامک.';
+                    statusEl.innerText = ' خطا در ارسال پیامک.';
                     statusEl.style.color = 'var(--danger)';
                 }
             } catch (e) {
-                statusEl.innerText = '❌ خطا در برقراری ارتباط.';
+                statusEl.innerText = ' خطا در برقراری ارتباط.';
             } finally {
                 btn.disabled = false;
             }
