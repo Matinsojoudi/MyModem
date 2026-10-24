@@ -185,7 +185,7 @@ class ModemBatteryApp(rumps.App):
         if not is_charging:
             if battery_percent <= 5 and not self.alerted_5:
                 send_macos_notification(
-                    title="🚨 شارژ مودم بسیار بحرانی!",
+                    title="هشدار بحرانی باتری مودم",
                     message=f"شارژ باتری مودم به {battery_percent}٪ رسیده و به زودی خاموش می‌شود! لطفاً سریعاً شارژر را متصل کنید.",
                     sound="Basso"
                 )
@@ -193,7 +193,7 @@ class ModemBatteryApp(rumps.App):
                 self.alerted_10 = True
             elif battery_percent <= 10 and not self.alerted_10:
                 send_macos_notification(
-                    title="⚠️ هشدار کمبود شارژ مودم",
+                    title="هشدار کمبود شارژ مودم",
                     message=f"شارژ باتری مودم به {battery_percent}٪ رسید. لطفاً آن را به شارژر متصل کنید.",
                     sound="Sosumi"
                 )

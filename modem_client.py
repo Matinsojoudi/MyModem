@@ -736,6 +736,133 @@ class ModemClient:
             "contacts_count": len(contacts)
         }
 
+    def get_connected_devices(self) -> Dict[str, Any]:
+        """
+        Fetches connected Wi-Fi devices, connection history, data consumption, and blocked status.
+        """
+        url = f"{self.base_url}?method=get&module=duster&file=json_device_management_info{int(time.time()*1000)}"
+        devices = []
+        try:
+            r = requests.get(url, timeout=self.timeout)
+            if r.status_code == 200:
+                raw_list = r.json().get("client_list", [])
+                for d in raw_list:
+                    mac = d.get("m", "").strip()
+                    if not mac:
+                        continue
+                    ip = d.get("ip", "").strip()
+                    status = str(d.get("s", "0"))
+                    
+                    # Decode hex device name
+                    raw_n = d.get("n", "")
+                    clean_name = ""
+                    try:
+                        clean_hex = "".join(raw_n.split())
+                        if clean_hex:
+                            clean_name = bytes.fromhex(clean_hex).decode("utf-8", errors="ignore").strip()
+                    except Exception:
+                        clean_name = raw_n.strip()
+                    if not clean_name or clean_name.lower() == mac.lower():
+                        clean_name = "دستگاه بی‌نام"
+
+                    duration_sec = int(d.get("tf", 0)) if str(d.get("tf", "")).isdigit() else 0
+                    
+                    # Sanitize 64-bit kernel counter underflow/overflow numbers (> 10 TB in mifi router)
+                    def safe_b(val_str):
+                        try:
+                            v = int(val_str)
+                            return 0 if v > 10 * (1024**4) or v < 0 else v
+                        except Exception:
+                            return 0
+
+                    rx_bytes = safe_b(d.get("rx", 0))
+                    tx_bytes = safe_b(d.get("tx", 0))
+                    total_bytes = rx_bytes + tx_bytes
+
+                    def fmt_bytes(b: int) -> str:
+                        if b < 1024:
+                            return f"{b} B"
+                        elif b < 1024 * 1024:
+                            return f"{b / 1024:.1f} KB"
+                        elif b < 1024 * 1024 * 1024:
+                            return f"{b / (1024 * 1024):.1f} MB"
+                        else:
+                            return f"{b / (1024 * 1024 * 1024):.2f} GB"
+
+                    def fmt_dur(seconds: int) -> str:
+                        if seconds <= 0:
+                            return "لحظه‌ای"
+                        h, rem = divmod(seconds, 3600)
+                        m, s = divmod(rem, 60)
+                        parts = []
+                        if h > 0:
+                            parts.append(f"{h} ساعت")
+                        if m > 0:
+                            parts.append(f"{m} دقیقه")
+                        if not parts:
+                            parts.append(f"{s} ثانیه")
+                        return " و ".join(parts)
+
+                    # Status: 1=Online, 0=Offline/History, 2=Blocked
+                    is_online = (status == "1") and (ip != "NA") and bool(ip)
+                    is_blocked = (status == "2")
+
+                    devices.append({
+                        "id": d.get("i", ""),
+                        "mac": mac,
+                        "ip": ip if (ip != "NA" and ip) else "آفلاین",
+                        "name": clean_name,
+                        "status_code": status,
+                        "is_online": is_online,
+                        "is_blocked": is_blocked,
+                        "conn_type": d.get("ct", "WIFI"),
+                        "duration_sec": duration_sec,
+                        "duration_str": fmt_dur(duration_sec),
+                        "last_active": d.get("ta", ""),
+                        "rx_bytes": rx_bytes,
+                        "tx_bytes": tx_bytes,
+                        "total_bytes": total_bytes,
+                        "rx_str": fmt_bytes(rx_bytes),
+                        "tx_str": fmt_bytes(tx_bytes),
+                        "total_str": fmt_bytes(total_bytes)
+                    })
+        except Exception as e:
+            print(f"[ModemClient] get_connected_devices error: {e}")
+
+        # Sort: online first, then blocked, then by total traffic descending
+        devices.sort(key=lambda x: (not x["is_online"], not x["is_blocked"], -x["total_bytes"]))
+
+        online_count = sum(1 for d in devices if d["is_online"])
+        blocked_count = sum(1 for d in devices if d["is_blocked"])
+
+        return {
+            "devices": devices,
+            "total_count": len(devices),
+            "online_count": online_count,
+            "blocked_count": blocked_count
+        }
+
+    def set_device_management(self, action: str, mac: str = "") -> bool:
+        """
+        Controls device access on modem:
+        action '2': Block device
+        action '3': Unblock device
+        action '1': Disconnect device
+        action '4': Reset traffic counters
+        """
+        url = f"{self.base_url}?method=post&module=duster&file=json_device_management_set{int(time.time()*1000)}"
+        payload = {"action": str(action)}
+        if mac:
+            payload["mac"] = mac
+        try:
+            r = requests.post(url, json=payload, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                return data.get("result") == "success"
+        except Exception as e:
+            print(f"[ModemClient] set_device_management error: {e}")
+        return False
+
     def reboot(self) -> bool:
         """Reboots modem."""
         url = f"{self.base_url}?method=get&module=duster&file=json_device_restart{int(time.time()*1000)}"

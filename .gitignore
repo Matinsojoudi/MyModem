@@ -7,3 +7,5 @@ __pycache__/
 *.swp
 .idea/
 .vscode/
+.sessions.json
+auth_config.json

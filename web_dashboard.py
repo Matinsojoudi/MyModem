@@ -14,10 +14,115 @@ import http.server
 import socketserver
 import json
 import urllib.parse
+import http.cookies
 from modem_client import ModemClient
+from auth_manager import auth_manager
 
 PORT = 8080
 client = ModemClient()
+
+LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ورود امن به پنل مدیریت مودم</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0b0f19;
+            --bg-surface: rgba(22, 30, 49, 0.85);
+            --border: rgba(255, 255, 255, 0.08);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --accent: #38bdf8;
+            --danger: #f43f5e;
+            --shadow: 0 20px 40px -15px rgba(0,0,0,0.5);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Vazirmatn', system-ui, sans-serif; }
+        body { background: var(--bg-base); color: var(--text-main); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .login-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 20px; padding: 36px 32px; width: 100%; max-width: 400px; box-shadow: var(--shadow); backdrop-filter: blur(16px); }
+        .login-header { text-align: center; margin-bottom: 28px; }
+        .login-icon { width: 56px; height: 56px; margin: 0 auto 16px; background: rgba(56, 189, 248, 0.12); border-radius: 16px; display: flex; align-items: center; justify-content: center; color: var(--accent); }
+        .login-title { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
+        .login-sub { font-size: 13px; color: var(--text-muted); }
+        .form-group { margin-bottom: 18px; }
+        .form-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-main); }
+        .form-input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.6); color: var(--text-main); font-size: 14px; outline: none; transition: border-color 0.2s; }
+        .form-input:focus { border-color: var(--accent); }
+        .btn-submit { width: 100%; padding: 12px; border-radius: 10px; border: none; background: var(--accent); color: #0b0f19; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.2s; margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-submit:hover { opacity: 0.9; }
+        .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+        .login-error { background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.3); color: #fb7185; padding: 10px 14px; border-radius: 10px; font-size: 12px; font-weight: 600; margin-bottom: 18px; display: none; text-align: center; }
+        .login-footer { margin-top: 24px; text-align: center; font-size: 11px; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="login-header">
+            <div class="login-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <h1 class="login-title">ورود امن به پنل مودم</h1>
+            <p class="login-sub">جهت دسترسی به پیامک‌ها، مخاطبین و مانیتورینگ وارد شوید</p>
+        </div>
+        <div id="login-error" class="login-error"></div>
+        <form id="login-form" onsubmit="handleLoginSubmit(event)">
+            <div class="form-group">
+                <label class="form-label">نام کاربری:</label>
+                <input type="text" id="username" class="form-input" placeholder="نام کاربری (پیش‌فرض: admin)" autocomplete="username" required autofocus>
+            </div>
+            <div class="form-group">
+                <label class="form-label">رمز عبور:</label>
+                <input type="password" id="password" class="form-input" placeholder="رمز عبور (پیش‌فرض: admin)" autocomplete="current-password" required>
+            </div>
+            <button type="submit" id="btn-login-submit" class="btn-submit">
+                ورود به پنل
+            </button>
+        </form>
+        <div class="login-footer">
+            احراز هویت رمزنگاری‌شده و حفاظت در برابر نفوذ شبکه
+        </div>
+    </div>
+    <script>
+        async function handleLoginSubmit(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-login-submit');
+            const errDiv = document.getElementById('login-error');
+            const user = document.getElementById('username').value.trim();
+            const pass = document.getElementById('password').value;
+
+            btn.disabled = true;
+            btn.innerText = 'در حال بررسی...';
+            errDiv.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username: user, password: pass })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    errDiv.innerText = data.message || 'نام کاربری یا رمز عبور اشتباه است.';
+                    errDiv.style.display = 'block';
+                }
+            } catch (err) {
+                errDiv.innerText = 'خطا در ارتباط با سرور.';
+                errDiv.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'ورود به پنل';
+            }
+        }
+    </script>
+</body>
+</html>
+"""
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -119,7 +224,7 @@ HTML_PAGE = """<!DOCTYPE html>
         .chat-user-title { font-weight: 700; font-size: 15px; }
         .chat-user-sub { font-size: 12px; color: var(--text-muted); }
         .chat-messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-        .chat-bubble { max-width: 75%; padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 1.6; word-break: break-word; position: relative; white-space: pre-wrap; }
+        .chat-bubble { max-width: 75%; padding: 8px 12px; border-radius: 14px; font-size: 13px; line-height: 1.5; word-break: break-word; position: relative; }
         .bubble-text { white-space: pre-wrap; word-break: break-word; }
         .bubble-in { align-self: flex-start; background: var(--bubble-in); color: var(--text-main); border: 1px solid var(--border); border-bottom-right-radius: 3px; }
         .bubble-out { align-self: flex-end; background: var(--bubble-out); color: #ffffff; border-bottom-left-radius: 3px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25); }
@@ -176,6 +281,37 @@ HTML_PAGE = """<!DOCTYPE html>
         .form-row label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
         .form-row input, .form-row select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-main); font-size: 13px; outline: none; }
         .form-row input:focus, .form-row select:focus { border-color: var(--accent); }
+        /* Connected Devices */
+        .devices-header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+        .devices-filter-group { display: flex; gap: 6px; flex-wrap: wrap; }
+        .btn-filter { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-filter.active, .btn-filter:hover { background: rgba(56, 189, 248, 0.15); color: var(--accent); border-color: rgba(56, 189, 248, 0.4); }
+        .devices-summary-pills { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+        .dev-pill { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
+        .dev-pill-val { font-size: 18px; font-weight: 800; color: var(--text-main); }
+        .dev-pill-label { font-size: 11px; color: var(--text-muted); }
+        .devices-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+        .device-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; transition: border-color 0.2s; position: relative; }
+        .device-card.is-online { border-right: 4px solid var(--success); }
+        .device-card.is-blocked { border-right: 4px solid var(--danger); }
+        .device-card.is-offline { border-right: 4px solid var(--text-muted); opacity: 0.85; }
+        .device-card.is-self { box-shadow: 0 0 0 1.5px var(--accent), 0 4px 18px rgba(56, 189, 248, 0.18); }
+        .device-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+        .device-icon-box { width: 40px; height: 40px; border-radius: 10px; background: rgba(56, 189, 248, 0.1); color: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .device-info { flex: 1; min-width: 0; }
+        .device-name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
+        .device-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+        .badge-self { background: rgba(245, 158, 11, 0.18); border: 1px solid rgba(245, 158, 11, 0.35); color: #fbbf24; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px; }
+        .device-badge-status { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+        .badge-online { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-blocked { background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3); }
+        .badge-offline { background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); }
+        .device-meta-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); padding: 4px 0; border-bottom: 1px dashed var(--border); }
+        .device-meta-val { font-weight: 600; color: var(--text-main); font-family: monospace; direction: ltr; }
+        .traffic-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; background: var(--input-bg); padding: 8px; border-radius: 8px; text-align: center; }
+        .traffic-val { font-size: 12px; font-weight: 700; color: var(--text-main); }
+        .traffic-lbl { font-size: 10px; color: var(--text-muted); }
+        .device-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
     </style>
 </head>
 <body>
@@ -190,6 +326,14 @@ HTML_PAGE = """<!DOCTYPE html>
                 <button class="btn-icon" onclick="toggleTheme()" id="theme-btn">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
                     تم روشن
+                </button>
+                <button class="btn-icon" onclick="openPasswordModal()" title="تنظیمات رمز عبور پنل">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    امنیت پنل
+                </button>
+                <button class="btn-icon" onclick="handleLogout()" title="خروج از حساب مدیریت">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    خروج
                 </button>
                 <button class="btn-icon" onclick="refreshStatus(); loadConversations();">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
@@ -207,7 +351,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 </div>
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--success);"><rect x="1" y="6" width="18" height="12" rx="2"/><line x1="23" y1="11" x2="23" y2="13"/></svg>
             </div>
-            <div class="stat-card">
+            <div class="stat-card" onclick="switchTab('devices')" style="cursor:pointer;" title="مشاهده لیست و کنترل دستگاه‌های متصل">
                 <div>
                     <div class="stat-label">دستگاه‌های متصل به وای‌فای</div>
                     <div class="stat-val" id="stat-wifi">--</div>
@@ -252,23 +396,27 @@ HTML_PAGE = """<!DOCTYPE html>
 
         <!-- Navigation Tabs -->
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('chat')">
+            <button class="tab-btn active" id="tab-btn-chat" onclick="switchTab('chat')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 پیام‌ها و گفتگوها
             </button>
-            <button class="tab-btn" onclick="switchTab('bulk')">
+            <button class="tab-btn" id="tab-btn-bulk" onclick="switchTab('bulk')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
                 ارسال پیامک انبوه
             </button>
-            <button class="tab-btn" onclick="switchTab('contacts')">
+            <button class="tab-btn" id="tab-btn-contacts" onclick="switchTab('contacts')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                 مخاطبین مودم
             </button>
-            <button class="tab-btn" onclick="switchTab('ussd')">
+            <button class="tab-btn" id="tab-btn-devices" onclick="switchTab('devices')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+                دستگاه‌های متصل
+            </button>
+            <button class="tab-btn" id="tab-btn-ussd" onclick="switchTab('ussd')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
                 کدهای دستوری (USSD)
             </button>
-            <button class="tab-btn" onclick="switchTab('control')">
+            <button class="tab-btn" id="tab-btn-control" onclick="switchTab('control')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 کنترل مودم
             </button>
@@ -462,6 +610,71 @@ HTML_PAGE = """<!DOCTYPE html>
             </div>
         </div>
 
+        <!-- Tab: Connected Devices -->
+        <div id="tab-devices" class="tab-content">
+            <div class="devices-header-bar">
+                <div>
+                    <h3 style="font-size:16px; font-weight:800; margin-bottom:4px;">مدیریت و نظارت دستگاه‌های متصل به مودم</h3>
+                    <div style="font-size:12px; color:var(--text-muted);">مشاهده حجم مصرف، سابقه اتصال، قطع موقت و مسدودسازی (بلاک)</div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-sm btn-secondary" onclick="resetDevicesTraffic()" title="صفر کردن کنتور دیتای دستگاه‌ها در مودم">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        بازنشانی آمار مصرف
+                    </button>
+                    <button class="btn-sm btn-primary" onclick="loadDevices()">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        بروزرسانی لیست
+                    </button>
+                </div>
+            </div>
+
+            <!-- Summary Counter Pills -->
+            <div class="devices-summary-pills">
+                <div class="dev-pill">
+                    <div class="dev-pill-val" id="pill-online-count" style="color:var(--success);">0</div>
+                    <div>
+                        <div style="font-weight:700; font-size:13px;">دستگاه‌های آنلاین</div>
+                        <div class="dev-pill-label">هم‌اکنون متصل به وای‌فای</div>
+                    </div>
+                </div>
+                <div class="dev-pill">
+                    <div class="dev-pill-val" id="pill-blocked-count" style="color:var(--danger);">0</div>
+                    <div>
+                        <div style="font-weight:700; font-size:13px;">دستگاه‌های مسدود</div>
+                        <div class="dev-pill-label">دسترسی مسدود شده</div>
+                    </div>
+                </div>
+                <div class="dev-pill">
+                    <div class="dev-pill-val" id="pill-total-count" style="color:var(--accent);">0</div>
+                    <div>
+                        <div style="font-weight:700; font-size:13px;">کل سابقه اتصالات</div>
+                        <div class="dev-pill-label">ذخیره در حافظه مودم</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter & Search Toolbar -->
+            <div class="contacts-toolbar">
+                <div class="devices-filter-group">
+                    <button class="btn-filter active" id="filter-all" onclick="setDeviceFilter('all')">همه دستگاه‌ها</button>
+                    <button class="btn-filter" id="filter-online" onclick="setDeviceFilter('online')">فقط آنلاین</button>
+                    <button class="btn-filter" id="filter-blocked" onclick="setDeviceFilter('blocked')">مسدود شده‌ها</button>
+                    <button class="btn-filter" id="filter-offline" onclick="setDeviceFilter('offline')">سابقه / آفلاین</button>
+                </div>
+                <input type="text" id="device-search" class="conv-search" placeholder="جستجو با نام، IP یا MAC آدرس..." style="max-width:280px;" oninput="applyDeviceFilter()">
+            </div>
+
+            <!-- Devices Cards Grid -->
+            <div id="devices-loading" style="text-align:center; padding:30px; color:var(--text-muted); font-size:13px;">
+                در حال دریافت اطلاعات دستگاه‌ها از مودم...
+            </div>
+            <div id="devices-grid" class="devices-grid" style="display:none;"></div>
+            <div id="devices-empty" style="display:none; text-align:center; padding:40px; color:var(--text-muted); font-size:13px;">
+                دستگاهی با این مشخصات یافت نشد.
+            </div>
+        </div>
+
         <!-- Tab 4: USSD -->
         <div id="tab-ussd" class="tab-content">
             <h3 style="font-size:16px; font-weight:800; margin-bottom:8px;">استعلام بسته اینترنت و شارژ</h3>
@@ -571,6 +784,35 @@ HTML_PAGE = """<!DOCTYPE html>
             </div>
         </div>
     </div>
+
+    <!-- Modal: Change Password & Security -->
+    <div class="modal-overlay" id="modal-password">
+        <div class="modal-card">
+            <h3 style="font-size:16px; font-weight:800; margin-bottom:14px;">تنظیمات امنیت و رمز ورود پنل</h3>
+            <div id="pwd-msg" style="display:none; padding:10px; border-radius:8px; font-size:12px; margin-bottom:12px; text-align:center;"></div>
+            <div class="form-row">
+                <label>رمز عبور فعلی:</label>
+                <input type="password" id="pwd-current" placeholder="رمز عبور فعلی (پیش‌فرض: admin)" autocomplete="current-password">
+            </div>
+            <div class="form-row">
+                <label>نام کاربری جدید (اختیاری):</label>
+                <input type="text" id="pwd-new-user" placeholder="نام کاربری جدید (خالی = بدون تغییر)" autocomplete="username">
+            </div>
+            <div class="form-row">
+                <label>رمز عبور جدید:</label>
+                <input type="password" id="pwd-new" placeholder="رمز عبور جدید (حداقل ۴ کاراکتر)" autocomplete="new-password">
+            </div>
+            <div class="form-row">
+                <label>تکرار رمز عبور جدید:</label>
+                <input type="password" id="pwd-confirm" placeholder="تکرار رمز عبور جدید" autocomplete="new-password">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                <button class="btn-sm btn-secondary" onclick="closePasswordModal()">انصراف</button>
+                <button class="btn-sm btn-primary" onclick="submitPasswordChange()">ذخیره و تغییر رمز</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let allConversations = [];
         let activePeer = null;
@@ -599,11 +841,16 @@ HTML_PAGE = """<!DOCTYPE html>
         function switchTab(tabId) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            event.currentTarget.classList.add('active');
+            const btn = document.getElementById('tab-btn-' + tabId);
+            if (btn) btn.classList.add('active');
+            else if (window.event && window.event.currentTarget && window.event.currentTarget.classList.contains('tab-btn')) {
+                window.event.currentTarget.classList.add('active');
+            }
             const target = document.getElementById('tab-' + tabId);
             if (target) target.classList.add('active');
             if (tabId === 'chat') loadConversations();
             if (tabId === 'contacts') loadContacts();
+            if (tabId === 'devices') loadDevices();
         }
 
         // Formatting & Security Utilities
@@ -796,13 +1043,8 @@ HTML_PAGE = """<!DOCTYPE html>
                 const bubbleClass = isOut ? 'bubble-out' : 'bubble-in';
                 const timeStr = m.time || '';
                 const missedAlert = m.is_missed_call ? '<div style="font-weight:700; color:var(--danger); margin-bottom:4px;">تماس از دست رفته</div>' : '';
-                msgsHtml += `
-                    <div class="chat-bubble ${bubbleClass}">
-                        ${missedAlert}
-                        <div class="bubble-text">${escapeHtml(m.text)}</div>
-                        <div class="bubble-meta">${timeStr}</div>
-                    </div>
-                `;
+                const cleanText = escapeHtml((m.text || '').trim());
+                msgsHtml += `<div class="chat-bubble ${bubbleClass}">${missedAlert}<div class="bubble-text">${cleanText}</div><div class="bubble-meta">${timeStr}</div></div>`;
             });
             messagesScroll.innerHTML = msgsHtml;
             messagesScroll.scrollTop = messagesScroll.scrollHeight;
@@ -1318,13 +1560,394 @@ HTML_PAGE = """<!DOCTYPE html>
             alert('دستور ری‌استارت ارسال شد.');
         }
 
+        // ================= CONNECTED DEVICES MANAGEMENT =================
+        let currentDevices = [];
+        let currentDeviceFilter = 'all';
+        let currentClientIp = '';
+
+        async function loadDevices() {
+            const loading = document.getElementById('devices-loading');
+            const grid = document.getElementById('devices-grid');
+            const empty = document.getElementById('devices-empty');
+            
+            try {
+                const res = await fetch('/api/devices');
+                if (res.status === 401) {
+                    window.location.reload();
+                    return;
+                }
+                const data = await res.json();
+                currentDevices = data.devices || [];
+                currentClientIp = data.current_client_ip || '';
+
+                // Update summary pills
+                const onlineCount = data.online_count !== undefined ? data.online_count : currentDevices.filter(d => d.status === 'online').length;
+                const blockedCount = data.blocked_count !== undefined ? data.blocked_count : currentDevices.filter(d => d.status === 'blocked').length;
+                const totalCount = data.total_count !== undefined ? data.total_count : currentDevices.length;
+
+                document.getElementById('pill-online-count').innerText = onlineCount;
+                document.getElementById('pill-blocked-count').innerText = blockedCount;
+                document.getElementById('pill-total-count').innerText = totalCount;
+                
+                const statWifi = document.getElementById('stat-wifi');
+                if (statWifi) statWifi.innerText = onlineCount + ' کلاینت';
+
+                applyDeviceFilter();
+            } catch (err) {
+                console.error('Error fetching devices:', err);
+                if (loading) loading.innerText = 'خطا در بارگذاری اطلاعات دستگاه‌ها از مودم.';
+            }
+        }
+
+        function setDeviceFilter(filter) {
+            currentDeviceFilter = filter;
+            document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
+            const activeBtn = document.getElementById('filter-' + filter);
+            if (activeBtn) activeBtn.classList.add('active');
+            applyDeviceFilter();
+        }
+
+        function applyDeviceFilter() {
+            const query = (document.getElementById('device-search')?.value || '').toLowerCase().trim();
+            const filtered = currentDevices.filter(d => {
+                const matchesFilter = (currentDeviceFilter === 'all') || (d.status === currentDeviceFilter);
+                if (!matchesFilter) return false;
+                if (!query) return true;
+                const name = (d.name || '').toLowerCase();
+                const ip = (d.ip || '').toLowerCase();
+                const mac = (d.mac || '').toLowerCase();
+                return name.includes(query) || ip.includes(query) || mac.includes(query);
+            });
+
+            renderDevicesGrid(filtered);
+        }
+
+        function renderDevicesGrid(list) {
+            const loading = document.getElementById('devices-loading');
+            const grid = document.getElementById('devices-grid');
+            const empty = document.getElementById('devices-empty');
+            if (loading) loading.style.display = 'none';
+
+            if (!list || list.length === 0) {
+                if (grid) grid.style.display = 'none';
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+
+            if (empty) empty.style.display = 'none';
+            if (grid) grid.style.display = 'grid';
+
+            let html = '';
+            list.forEach(d => {
+                const isOnline = d.status === 'online';
+                const isBlocked = d.status === 'blocked';
+                const isOffline = d.status === 'offline';
+
+                const isSelf = (d.ip && (d.ip === currentClientIp || (currentClientIp === '127.0.0.1' && (d.ip === '192.168.1.198' || (d.name && d.name.toLowerCase().includes('macbook'))))));
+
+                let cardClass = isOnline ? 'is-online' : (isBlocked ? 'is-blocked' : 'is-offline');
+                if (isSelf) cardClass += ' is-self';
+
+                const badgeClass = isOnline ? 'badge-online' : (isBlocked ? 'badge-blocked' : 'badge-offline');
+                const badgeText = isOnline ? 'آنلاین' : (isBlocked ? 'مسدود شده' : 'سابقه (آفلاین)');
+
+                const nameLower = (d.name || '').toLowerCase();
+                let iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>';
+                if (nameLower.includes('macbook') || nameLower.includes('pc') || nameLower.includes('laptop') || nameLower.includes('desktop')) {
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></svg>';
+                } else if (nameLower.includes('phone') || nameLower.includes('iphone') || nameLower.includes('android') || nameLower.includes('galaxy') || nameLower.includes('redmi') || nameLower.includes('xiaomi')) {
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>';
+                }
+
+                const displayName = escapeHtml(d.name || 'دستگاه بدون نام');
+                const selfBadge = isSelf ? '<span class="badge-self">این دستگاه (شما)</span>' : '';
+
+                let actionBtns = '';
+                const safeMac = escapeHtml(d.mac);
+                const safeName = escapeHtml(d.name || d.mac).replace(/'/g, "\\'");
+
+                if (isBlocked) {
+                    actionBtns = `
+                        <button class="btn-sm btn-primary" onclick="unblockDevice('${safeMac}', '${safeName}')">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                            رفع مسدودی (آنبلاک)
+                        </button>
+                    `;
+                } else if (isOnline) {
+                    actionBtns = `
+                        <button class="btn-sm btn-danger" onclick="blockDevice('${safeMac}', '${safeName}', ${isSelf})">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                            مسدود کردن (بلاک)
+                        </button>
+                        <button class="btn-sm btn-secondary" onclick="disconnectDevice('${safeMac}', '${safeName}')">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                            قطع اتصال
+                        </button>
+                    `;
+                } else {
+                    actionBtns = `
+                        <button class="btn-sm btn-danger" onclick="blockDevice('${safeMac}', '${safeName}', false)">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                            مسدودسازی پیشگیرانه
+                        </button>
+                    `;
+                }
+
+                html += `
+                    <div class="device-card ${cardClass}">
+                        <div>
+                            <div class="device-top">
+                                <div class="device-icon-box">${iconSvg}</div>
+                                <div class="device-info">
+                                    <div class="device-name-row">
+                                        <span class="device-name" title="${displayName}">${displayName}</span>
+                                        ${selfBadge}
+                                    </div>
+                                    <span class="device-badge-status ${badgeClass}">${badgeText}</span>
+                                </div>
+                            </div>
+                            
+                            <div style="margin-top:12px;">
+                                <div class="device-meta-row">
+                                    <span>آدرس IP:</span>
+                                    <span class="device-meta-val" onclick="copyText('${d.ip}', 'IP')" style="cursor:pointer;" title="کلیک برای کپی">${escapeHtml(d.ip || '--')}</span>
+                                </div>
+                                <div class="device-meta-row">
+                                    <span>آدرس MAC:</span>
+                                    <span class="device-meta-val" onclick="copyText('${d.mac}', 'MAC')" style="cursor:pointer;" title="کلیک برای کپی">${escapeHtml(d.mac || '--')}</span>
+                                </div>
+                                <div class="device-meta-row">
+                                    <span>مدت زمان اتصال:</span>
+                                    <span style="font-weight:600; color:var(--text-main); font-size:12px;">${escapeHtml(d.duration_str || 'نامشخص')}</span>
+                                </div>
+                            </div>
+
+                            <div style="margin-top:10px;">
+                                <div class="traffic-grid">
+                                    <div>
+                                        <div class="traffic-val" style="color:#38bdf8;">${escapeHtml(d.rx_str || '0 B')}</div>
+                                        <div class="traffic-lbl">دانلود</div>
+                                    </div>
+                                    <div>
+                                        <div class="traffic-val" style="color:#c084fc;">${escapeHtml(d.tx_str || '0 B')}</div>
+                                        <div class="traffic-lbl">آپلود</div>
+                                    </div>
+                                    <div>
+                                        <div class="traffic-val" style="color:#10b981;">${escapeHtml(d.total_str || '0 B')}</div>
+                                        <div class="traffic-lbl">مجموع مصرف</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="device-actions">
+                            ${actionBtns}
+                        </div>
+                    </div>
+                `;
+            });
+
+            grid.innerHTML = html;
+        }
+
+        async function blockDevice(mac, name, isSelf) {
+            if (!mac) return;
+            if (isSelf) {
+                const confirmed = confirm(
+                    'هشدار امنیتی بسیار مهم:\\n' +
+                    'این دستگاه (' + (name || mac) + ') همان کامپیوتر یا موبایلی است که هم‌اکنون با آن وارد پنل مدیریت شده‌اید!\\n\\n' +
+                    'در صورت مسدودسازی (بلاک)، بلافاصله ارتباط وای‌فای شما با مودم قطع خواهد شد و دسترسی‌تان قطع می‌شود.\\n\\n' +
+                    'آیا واقعاً و با اطمینان کامل می‌خواهید این دستگاه را بلاک کنید؟'
+                );
+                if (!confirmed) return;
+            } else {
+                if (!confirm('آیا از مسدود کردن دستگاه «' + (name || mac) + '» و قطع دسترسی آن مطمئن هستید؟')) return;
+            }
+
+            try {
+                const res = await fetch('/api/devices/block', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ mac })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('دستگاه با موفقیت مسدود شد.');
+                    loadDevices();
+                } else {
+                    alert('خطا در اعمال دستور به مودم.');
+                }
+            } catch (err) {
+                alert('خطا در ارتباط با سرور.');
+            }
+        }
+
+        async function unblockDevice(mac, name) {
+            if (!mac) return;
+            if (!confirm('آیا مایل به رفع مسدودی (آنبلاک) دستگاه «' + (name || mac) + '» هستید؟')) return;
+
+            try {
+                const res = await fetch('/api/devices/unblock', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ mac })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('مسدودی دستگاه با موفقیت برطرف شد.');
+                    loadDevices();
+                } else {
+                    alert('خطا در اعمال دستور به مودم.');
+                }
+            } catch (err) {
+                alert('خطا در ارتباط با سرور.');
+            }
+        }
+
+        async function disconnectDevice(mac, name) {
+            if (!mac) return;
+            if (!confirm('آیا از قطع موقت اتصال دستگاه «' + (name || mac) + '» مطمئن هستید؟ (دستگاه می‌تواند مجدداً متصل شود)')) return;
+
+            try {
+                const res = await fetch('/api/devices/disconnect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ mac })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('دستور قطع اتصال به مودم ارسال شد.');
+                    loadDevices();
+                } else {
+                    alert('خطا در اعمال دستور به مودم.');
+                }
+            } catch (err) {
+                alert('خطا در ارتباط با سرور.');
+            }
+        }
+
+        async function resetDevicesTraffic() {
+            if (!confirm('آیا از بازنشانی و صفر کردن آمار مصرف دیتای دستگاه‌ها در مودم مطمئن هستید؟')) return;
+
+            try {
+                const res = await fetch('/api/devices/reset_traffic', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('آمار مصرف دستگاه‌ها با موفقیت ریست شد.');
+                    loadDevices();
+                } else {
+                    alert('خطا در ریست آمار.');
+                }
+            } catch (err) {
+                alert('خطا در برقراری ارتباط.');
+            }
+        }
+
+        function copyText(val, label) {
+            if (!val) return;
+            navigator.clipboard.writeText(val);
+            alert(label + ' (' + val + ') در کلیپ‌بورد کپی شد.');
+        }
+
+        // ================= SECURITY & AUTHENTICATION =================
+        function openPasswordModal() {
+            document.getElementById('pwd-msg').style.display = 'none';
+            document.getElementById('pwd-current').value = '';
+            document.getElementById('pwd-new-user').value = '';
+            document.getElementById('pwd-new').value = '';
+            document.getElementById('pwd-confirm').value = '';
+            document.getElementById('modal-password').classList.add('active');
+        }
+
+        function closePasswordModal() {
+            document.getElementById('modal-password').classList.remove('active');
+        }
+
+        async function submitPasswordChange() {
+            const currentPass = document.getElementById('pwd-current').value;
+            const newUser = document.getElementById('pwd-new-user').value.trim();
+            const newPass = document.getElementById('pwd-new').value;
+            const confirmPass = document.getElementById('pwd-confirm').value;
+            const msgDiv = document.getElementById('pwd-msg');
+
+            msgDiv.style.display = 'none';
+
+            if (!currentPass) {
+                msgDiv.innerText = 'لطفاً رمز عبور فعلی را وارد کنید.';
+                msgDiv.style.background = 'rgba(244, 63, 94, 0.15)';
+                msgDiv.style.color = '#fb7185';
+                msgDiv.style.display = 'block';
+                return;
+            }
+
+            if (!newPass || newPass.length < 4) {
+                msgDiv.innerText = 'رمز عبور جدید باید حداقل ۴ کاراکتر باشد.';
+                msgDiv.style.background = 'rgba(244, 63, 94, 0.15)';
+                msgDiv.style.color = '#fb7185';
+                msgDiv.style.display = 'block';
+                return;
+            }
+
+            if (newPass !== confirmPass) {
+                msgDiv.innerText = 'رمز عبور جدید و تکرار آن یکسان نیستند.';
+                msgDiv.style.background = 'rgba(244, 63, 94, 0.15)';
+                msgDiv.style.color = '#fb7185';
+                msgDiv.style.display = 'block';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/auth/change_password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        current_password: currentPass,
+                        new_username: newUser,
+                        new_password: newPass
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    msgDiv.innerText = data.message || 'رمز عبور با موفقیت به‌روزرسانی شد.';
+                    msgDiv.style.background = 'rgba(16, 185, 129, 0.15)';
+                    msgDiv.style.color = '#34d399';
+                    msgDiv.style.display = 'block';
+                    setTimeout(() => { closePasswordModal(); }, 1800);
+                } else {
+                    msgDiv.innerText = data.message || 'خطا در تغییر رمز عبور.';
+                    msgDiv.style.background = 'rgba(244, 63, 94, 0.15)';
+                    msgDiv.style.color = '#fb7185';
+                    msgDiv.style.display = 'block';
+                }
+            } catch (err) {
+                msgDiv.innerText = 'خطا در برقراری ارتباط با سرور.';
+                msgDiv.style.background = 'rgba(244, 63, 94, 0.15)';
+                msgDiv.style.color = '#fb7185';
+                msgDiv.style.display = 'block';
+            }
+        }
+
+        async function handleLogout() {
+            if (!confirm('آیا می‌خواهید از پنل مدیریت خارج شوید؟')) return;
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch (e) {}
+            window.location.reload();
+        }
+
         // Init
         initTheme();
         refreshStatus();
         loadConversations();
         loadContacts();
+        loadDevices();
         setInterval(refreshStatus, 2500);
         setInterval(loadConversations, 10000);
+        setInterval(loadDevices, 15000);
     </script>
 </body>
 </html>
@@ -1332,6 +1955,57 @@ HTML_PAGE = """<!DOCTYPE html>
 
 
 class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
+    def get_session_token(self):
+        cookie_header = self.headers.get("Cookie", "")
+        if not cookie_header:
+            return None
+        cookies = http.cookies.SimpleCookie()
+        try:
+            cookies.load(cookie_header)
+            if "session_id" in cookies:
+                return cookies["session_id"].value
+        except Exception:
+            pass
+        return None
+
+    def render_login_page(self):
+        encoded = LOGIN_PAGE.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            self.wfile.write(encoded)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def send_json(self, data, status=200):
+        try:
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def send_json_with_cookie(self, data, cookie_str, status=200):
+        try:
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Set-Cookie", cookie_str)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1340,6 +2014,17 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         url_parsed = urllib.parse.urlparse(self.path)
         path = url_parsed.path
+
+        session_id = self.get_session_token()
+        is_authed = auth_manager.is_valid_session(session_id)
+
+        if not is_authed:
+            if path in ["/", "/index.html"]:
+                self.render_login_page()
+                return
+            else:
+                self.send_json({"error": "Unauthorized"}, status=401)
+                return
 
         if path == "/" or path == "/index.html":
             encoded = HTML_PAGE.encode("utf-8")
@@ -1369,6 +2054,12 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(contacts)
             return
 
+        elif path == "/api/devices":
+            dev_data = client.get_connected_devices()
+            dev_data["current_client_ip"] = self.client_address[0]
+            self.send_json(dev_data)
+            return
+
         elif path == "/api/sms":
             sms_data = client.get_sms_list(page=1, data_per_page=50)
             self.send_json(sms_data)
@@ -1388,7 +2079,63 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
         except Exception:
             payload = {}
 
-        if path == "/api/send_sms":
+        # Handle login (unauthenticated endpoint)
+        if path == "/api/auth/login":
+            client_ip = self.client_address[0]
+            username = payload.get("username", "")
+            password = payload.get("password", "")
+            success, token, msg = auth_manager.login(username, password, client_ip)
+            if success and token:
+                cookie_header = f"session_id={token}; Path=/; Max-Age={30*86400}; HttpOnly; SameSite=Lax"
+                self.send_json_with_cookie({"success": True}, cookie_header)
+            else:
+                self.send_json({"success": False, "message": msg}, status=401)
+            return
+
+        # Authenticate all other POST requests
+        session_id = self.get_session_token()
+        if not auth_manager.is_valid_session(session_id):
+            self.send_json({"error": "Unauthorized"}, status=401)
+            return
+
+        if path == "/api/auth/logout":
+            auth_manager.revoke_session(session_id)
+            cookie_header = "session_id=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+            self.send_json_with_cookie({"success": True}, cookie_header)
+            return
+
+        elif path == "/api/auth/change_password":
+            old_pass = payload.get("current_password", "")
+            new_user = payload.get("new_username", "")
+            new_pass = payload.get("new_password", "")
+            success, msg = auth_manager.change_credentials(old_pass, new_user, new_pass)
+            self.send_json({"success": success, "message": msg})
+            return
+
+        elif path == "/api/devices/block":
+            mac = payload.get("mac", "")
+            success = client.set_device_management(2, mac)
+            self.send_json({"success": success})
+            return
+
+        elif path == "/api/devices/unblock":
+            mac = payload.get("mac", "")
+            success = client.set_device_management(3, mac)
+            self.send_json({"success": success})
+            return
+
+        elif path == "/api/devices/disconnect":
+            mac = payload.get("mac", "")
+            success = client.set_device_management(1, mac)
+            self.send_json({"success": success})
+            return
+
+        elif path == "/api/devices/reset_traffic":
+            success = client.set_device_management(4)
+            self.send_json({"success": success})
+            return
+
+        elif path == "/api/send_sms":
             phone = payload.get("phone", "")
             text = payload.get("text", "")
             success = client.send_sms(phone, text)
@@ -1454,19 +2201,6 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
 
         self.send_error(404, "Not Found")
 
-    def send_json(self, data):
-        try:
-            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Connection", "close")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
     def log_message(self, format, *args):
         return
 
@@ -1477,8 +2211,8 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def run_server():
-    with ThreadedHTTPServer(("127.0.0.1", PORT), ModemDashboardHandler) as httpd:
-        print(f"Modem Dashboard running at http://127.0.0.1:{PORT}")
+    with ThreadedHTTPServer(("0.0.0.0", PORT), ModemDashboardHandler) as httpd:
+        print(f"Modem Dashboard running at http://0.0.0.0:{PORT}")
         httpd.serve_forever()
 
 
