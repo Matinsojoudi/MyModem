@@ -416,6 +416,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
                 کدهای دستوری (USSD)
             </button>
+            <button class="tab-btn" id="tab-btn-parental" onclick="switchTab('parental')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                محافظت از کودکان و امنیت
+            </button>
             <button class="tab-btn" id="tab-btn-control" onclick="switchTab('control')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 کنترل مودم
@@ -709,6 +713,121 @@ HTML_PAGE = """<!DOCTYPE html>
                 <a href="http://192.168.1.1" target="_blank" class="btn-sm btn-primary" style="text-decoration:none; padding:10px 18px;">باز کردن پنل اصلی مودم</a>
             </div>
         </div>
+
+        <!-- Tab 6: Parental & Child Protection -->
+        <div id="tab-parental" class="tab-content">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+                <div>
+                    <h3 style="font-size:17px; font-weight:800; margin-bottom:6px;">محافظت از کودکان و امنیت خانواده</h3>
+                    <p style="color:var(--text-muted); font-size:13px; margin:0;">اعمال فیلتر خودکار محتوای نامناسب، اجبار به جستجوی امن (SafeSearch) در گوگل و موتورهای جستجو، و نظارت بر شبکه</p>
+                </div>
+                <button class="btn-sm btn-secondary" onclick="loadParentalStatus()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    بروزرسانی وضعیت
+                </button>
+            </div>
+
+            <!-- Status Card -->
+            <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                <div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">وضعیت فعال محافظت مودم:</div>
+                    <div id="parental-status-badge" style="font-size:16px; font-weight:800; color:var(--primary); display:flex; align-items:center; gap:8px;">
+                        در حال بارگذاری وضعیت...
+                    </div>
+                    <div id="parental-status-desc" style="font-size:12px; color:var(--text-muted); margin-top:6px;">
+                        سرورهای DNS در حال حاضر: <span id="current-dns-display" style="direction:ltr; display:inline-block; font-family:monospace; font-weight:600;">-</span>
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn-sm btn-danger" onclick="applyDnsProfile('off')" id="btn-disable-parental">
+                        غیرفعال‌سازی فیلتر (حالت عادی)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Protection Profiles Grid -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:18px; margin-bottom:28px;">
+                
+                <!-- Cloudflare Family Card -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:20px; display:flex; flex-direction:column; justify-content:space-between;">
+                    <div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                            <span style="font-weight:800; font-size:15px; color:var(--text-main);">محافظت از کودکان و جستجوی امن</span>
+                            <span style="font-size:11px; background:rgba(16,185,129,0.15); color:var(--success); padding:3px 8px; border-radius:6px; font-weight:700;">پیشنهاد اصلی</span>
+                        </div>
+                        <p style="font-size:12.5px; color:var(--text-muted); line-height:1.7; margin-bottom:14px;">
+                            با استفاده از سرورهای خانواده کلودفلر (1.1.1.3)، تمامی محتوای نامناسب و بدافزارها برای کل خانه مسدود شده و قابلیت <strong>SafeSearch اجباری</strong> روی گوگل، بینگ و یوتیوب قفل می‌شود تا کودک نتواند محتوای نامناسب را جستجو یا مشاهده کند.
+                        </p>
+                        <div style="background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:8px 12px; font-size:11.5px; color:var(--text-muted); margin-bottom:16px;">
+                            دی‌ان‌اس اعمالی: <span style="direction:ltr; display:inline-block; font-family:monospace; font-weight:700; color:var(--text-main);">1.1.1.3 & 1.0.0.3</span>
+                        </div>
+                    </div>
+                    <button class="btn-sm btn-primary" style="width:100%; justify-content:center; padding:10px;" onclick="applyDnsProfile('cloudflare_family')" id="btn-apply-cf">
+                        فعال‌سازی محافظت کلودفلر
+                    </button>
+                </div>
+
+                <!-- AdGuard Family Card -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:20px; display:flex; flex-direction:column; justify-content:space-between;">
+                    <div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                            <span style="font-weight:800; font-size:15px; color:var(--text-main);">محافظت خانواده و ضدتبلیغات</span>
+                            <span style="font-size:11px; background:rgba(59,130,246,0.15); color:var(--primary); padding:3px 8px; border-radius:6px; font-weight:700;">ادگارد فمیلی</span>
+                        </div>
+                        <p style="font-size:12.5px; color:var(--text-muted); line-height:1.7; margin-bottom:14px;">
+                            علاوه بر فیلتر کامل دامنه‌های نامناسب و قفل جستجوی امن در موتورهای جستجو، تمام تبلیغات پاپ‌آپ و اسپم‌های خطرناک را در وب‌سایت‌ها برای تبلت و گوشی کودک مسدود می‌کند.
+                        </p>
+                        <div style="background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:8px 12px; font-size:11.5px; color:var(--text-muted); margin-bottom:16px;">
+                            دی‌ان‌اس اعمالی: <span style="direction:ltr; display:inline-block; font-family:monospace; font-weight:700; color:var(--text-main);">94.140.14.15 & 94.140.15.16</span>
+                        </div>
+                    </div>
+                    <button class="btn-sm btn-primary" style="width:100%; justify-content:center; padding:10px;" onclick="applyDnsProfile('adguard_family')" id="btn-apply-adg">
+                        فعال‌سازی محافظت ادگارد
+                    </button>
+                </div>
+
+                <!-- Live DNS Logging & Monitoring (NextDNS) -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:20px; display:flex; flex-direction:column; justify-content:space-between;">
+                    <div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                            <span style="font-weight:800; font-size:15px; color:var(--text-main);">نظارت و ثبت زنده دامنه‌ها (NextDNS)</span>
+                            <span style="font-size:11px; background:rgba(245,158,11,0.15); color:var(--warning); padding:3px 8px; border-radius:6px; font-weight:700;">گزارش زنده</span>
+                        </div>
+                        <p style="font-size:12.5px; color:var(--text-muted); line-height:1.7; margin-bottom:14px;">
+                            اگر می‌خواهید دقیقاً ببینید چه دامنه‌ها و سرویس‌هایی توسط دستگاه کودک صدا زده می‌شوند، آی‌پی DNS حساب اختصاصی خود در NextDNS را وارد کنید تا تمام لاگ‌ها در پنل شخصی‌تان نمایش داده شود.
+                        </p>
+                        <div style="display:flex; gap:8px; margin-bottom:14px;">
+                            <input type="text" id="custom-dns1" placeholder="DNS اول (مثلاً 45.90.28.x)" style="direction:ltr; flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text-main); font-size:12px;">
+                            <input type="text" id="custom-dns2" placeholder="DNS دوم" style="direction:ltr; flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--input-bg); color:var(--text-main); font-size:12px;">
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-sm btn-primary" style="flex:1; justify-content:center; padding:10px;" onclick="saveCustomDns()">
+                            اعمال DNS نظارتی
+                        </button>
+                        <a href="https://nextdns.io" target="_blank" class="btn-sm btn-secondary" style="text-decoration:none; padding:10px 14px;">
+                            سایت NextDNS
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Device Access & Sleep Control -->
+            <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:14px; padding:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                    <div>
+                        <h4 style="font-size:15px; font-weight:800; margin-bottom:4px;">کنترل سریع اینترنت دستگاه کودک (ساعات خواب و مطالعه)</h4>
+                        <p style="color:var(--text-muted); font-size:12.5px; margin:0;">می‌توانید در ساعات خواب شبانه یا زمان مطالعه، اینترنت دستگاه مشخص را با یک کلیک مسدود کنید.</p>
+                    </div>
+                    <button class="btn-sm btn-secondary" onclick="loadParentalDevices()">
+                        بروزرسانی دستگاه‌ها
+                    </button>
+                </div>
+                <div id="parental-devices-container" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-top:14px;">
+                    <!-- Rendered dynamically -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Modal: New Chat -->
@@ -851,6 +970,7 @@ HTML_PAGE = """<!DOCTYPE html>
             if (tabId === 'chat') loadConversations();
             if (tabId === 'contacts') loadContacts();
             if (tabId === 'devices') loadDevices();
+            if (tabId === 'parental') loadParentalStatus();
         }
 
         // Formatting & Security Utilities
@@ -1857,6 +1977,139 @@ HTML_PAGE = """<!DOCTYPE html>
             alert(label + ' (' + val + ') در کلیپ‌بورد کپی شد.');
         }
 
+        // ================= PARENTAL CONTROL & FAMILY DNS =================
+        async function loadParentalStatus() {
+            try {
+                const res = await fetch('/api/dns');
+                if (res.status === 401) { location.reload(); return; }
+                const data = await res.json();
+                
+                const badge = document.getElementById('parental-status-badge');
+                const desc = document.getElementById('current-dns-display');
+                
+                if (data.dns_enable && data.profile !== 'off') {
+                    badge.innerHTML = `<span style="color:var(--success); display:inline-flex; align-items:center; gap:6px;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+                        فعال: ${data.profile_title}
+                    </span>`;
+                    desc.innerText = `${data.dns1} , ${data.dns2}`;
+                } else {
+                    badge.innerHTML = `<span style="color:var(--text-muted); display:inline-flex; align-items:center; gap:6px;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+                        غیرفعال (حالت پیش‌فرض اپراتور)
+                    </span>`;
+                    desc.innerText = 'خودکار (پیش‌فرض سیم‌کارت بدون فیلتر)';
+                }
+
+                if (data.profile === 'custom') {
+                    if (data.dns1) document.getElementById('custom-dns1').value = data.dns1;
+                    if (data.dns2) document.getElementById('custom-dns2').value = data.dns2;
+                }
+
+                loadParentalDevices();
+            } catch (e) {
+                console.error('loadParentalStatus error:', e);
+            }
+        }
+
+        async function loadParentalDevices() {
+            try {
+                const res = await fetch('/api/devices');
+                const data = await res.json();
+                const container = document.getElementById('parental-devices-container');
+                if (!container) return;
+                
+                const list = (data.devices || []).filter(d => d.status === 'online' || d.is_online);
+                if (list.length === 0) {
+                    container.innerHTML = '<div style="color:var(--text-muted); font-size:13px; grid-column:1/-1;">هیچ دستگاه آنلاینی یافت نشد.</div>';
+                    return;
+                }
+
+                let html = '';
+                list.forEach(d => {
+                    const isSelf = d.is_host;
+                    html += `
+                    <div style="background:var(--input-bg); border:1px solid var(--border); border-radius:10px; padding:12px; display:flex; flex-direction:column; justify-content:space-between; gap:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-weight:700; font-size:13px; color:var(--text-main);">${escapeHtml(d.name)} ${isSelf ? '<span style="font-size:10px; color:var(--warning);">(دستگاه شما)</span>' : ''}</div>
+                                <div style="font-size:11px; color:var(--text-muted); font-family:monospace; margin-top:2px;">${d.ip}</div>
+                            </div>
+                            <span style="font-size:10.5px; background:rgba(16,185,129,0.15); color:var(--success); padding:2px 6px; border-radius:4px; font-weight:700;">آنلاین</span>
+                        </div>
+                        <div style="font-size:11.5px; color:var(--text-muted); display:flex; justify-content:space-between;">
+                            <span>مصرف کل: <strong>${d.traffic_str || '0 B'}</strong></span>
+                            <span>مدت اتصال: <strong>${d.duration_str || '0'}</strong></span>
+                        </div>
+                        <div style="display:flex; gap:6px; margin-top:4px;">
+                            ${isSelf ? '<span style="font-size:11px; color:var(--text-muted);">سیستم اصلی محافظت‌شده</span>' : `
+                                <button class="btn-sm btn-danger" style="flex:1; justify-content:center; font-size:11px; padding:6px;" onclick="blockDevice('${d.mac}', '${escapeHtml(d.name)}')">
+                                    قطع اینترنت (خواب کودک)
+                                </button>
+                                <button class="btn-sm btn-secondary" style="font-size:11px; padding:6px 10px;" onclick="disconnectDevice('${d.mac}', '${escapeHtml(d.name)}')">
+                                    قطع موقت
+                                </button>
+                            `}
+                        </div>
+                    </div>
+                    `;
+                });
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('loadParentalDevices error:', e);
+            }
+        }
+
+        async function applyDnsProfile(profile) {
+            let msg = 'آیا مایل به اعمال این پروفایل محافظت روی مودم هستید؟';
+            if (profile === 'off') {
+                msg = 'آیا از غیرفعال‌سازی فیلتر محافظت کودکان اطمینان دارید؟';
+            }
+            if (!confirm(msg)) return;
+
+            try {
+                const res = await fetch('/api/dns/set', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profile: profile })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(data.message || 'تنظیمات با موفقیت اعمال شد.');
+                    loadParentalStatus();
+                } else {
+                    alert(data.message || 'خطا در اعمال تنظیمات.');
+                }
+            } catch (e) {
+                alert('خطا در برقراری ارتباط با سرور.');
+            }
+        }
+
+        async function saveCustomDns() {
+            const dns1 = document.getElementById('custom-dns1').value.trim();
+            const dns2 = document.getElementById('custom-dns2').value.trim();
+            if (!dns1) {
+                alert('لطفاً حداقل آدرس DNS اول را وارد کنید.');
+                return;
+            }
+            try {
+                const res = await fetch('/api/dns/set', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profile: 'custom', dns1: dns1, dns2: dns2 })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('DNS نظارتی با موفقیت روی مودم تنظیم شد.');
+                    loadParentalStatus();
+                } else {
+                    alert(data.message || 'خطا در اعمال DNS.');
+                }
+            } catch (e) {
+                alert('خطا در ذخیره DNS.');
+            }
+        }
+
         // ================= SECURITY & AUTHENTICATION =================
         function openPasswordModal() {
             document.getElementById('pwd-msg').style.display = 'none';
@@ -2069,6 +2322,11 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(sms_data)
             return
 
+        elif path == "/api/dns":
+            dns_data = client.get_dhcp_info()
+            self.send_json(dns_data)
+            return
+
         self.send_error(404, "Not Found")
 
     def do_POST(self):
@@ -2137,6 +2395,14 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/devices/reset_traffic":
             success = client.set_device_management(4)
             self.send_json({"success": success})
+            return
+
+        elif path == "/api/dns/set":
+            profile = payload.get("profile", "off")
+            dns1 = payload.get("dns1", "")
+            dns2 = payload.get("dns2", "")
+            res = client.set_dns_config(profile, dns1, dns2)
+            self.send_json(res)
             return
 
         elif path == "/api/send_sms":

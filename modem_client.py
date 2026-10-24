@@ -903,6 +903,112 @@ class ModemClient:
             print(f"[ModemClient] set_device_management error: {e}")
         return False
 
+    def get_dhcp_info(self) -> dict:
+        """
+        Fetches current DHCP and DNS settings from modem.
+        """
+        url = f"{self.base_url}?method=get&module=duster&file=json_dhcp_info{int(time.time()*1000)}"
+        try:
+            r = requests.get(url, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                dns_enable = data.get("dns_enable") == "1"
+                dns1 = data.get("dns1", "").strip()
+                dns2 = data.get("dns2", "").strip()
+                
+                # Detect active profile
+                profile = "off"
+                profile_title = "حالت پیش‌فرض (بدون فیلتر)"
+                if dns_enable:
+                    if dns1 in ["1.1.1.3", "1.0.0.3"]:
+                        profile = "cloudflare_family"
+                        profile_title = "محافظت از کودکان (Cloudflare Family + جستجوی امن)"
+                    elif dns1 in ["94.140.14.15", "94.140.15.16"]:
+                        profile = "adguard_family"
+                        profile_title = "محافظت خانوادگی و ضدتبلیغ (AdGuard Family)"
+                    else:
+                        profile = "custom"
+                        profile_title = f"دی‌ان‌اس سفارشی ({dns1})"
+                
+                return {
+                    "success": True,
+                    "dns_enable": dns_enable,
+                    "dns1": dns1,
+                    "dns2": dns2,
+                    "profile": profile,
+                    "profile_title": profile_title,
+                    "start": data.get("start", "192.168.1.100"),
+                    "end": data.get("end", "192.168.1.200"),
+                    "lease_time": data.get("lease_time", "86400"),
+                    "ip": data.get("ip", "192.168.1.1")
+                }
+        except Exception as e:
+            print(f"[ModemClient] get_dhcp_info error: {e}")
+        return {
+            "success": False,
+            "dns_enable": False,
+            "dns1": "",
+            "dns2": "",
+            "profile": "off",
+            "profile_title": "نامشخص",
+            "error": "عدم برقراری ارتباط با مودم"
+        }
+
+    def set_dns_config(self, profile: str, dns1: str = "", dns2: str = "") -> dict:
+        """
+        Sets DNS configuration and parental control profile on modem.
+        profile: 'cloudflare_family' | 'adguard_family' | 'custom' | 'off'
+        """
+        curr = self.get_dhcp_info()
+        dns_enable = "1"
+        if profile == "cloudflare_family":
+            dns1 = "1.1.1.3"
+            dns2 = "1.0.0.3"
+        elif profile == "adguard_family":
+            dns1 = "94.140.14.15"
+            dns2 = "94.140.15.16"
+        elif profile == "off":
+            dns_enable = "0"
+            dns1 = ""
+            dns2 = ""
+        elif profile == "custom":
+            dns_enable = "1" if dns1 else "0"
+        else:
+            return {"success": False, "message": "پروفایل نامعتبر است"}
+
+        payload = {
+            "status": "1",
+            "dns_enable": dns_enable,
+            "dns1": dns1.strip(),
+            "dns2": dns2.strip(),
+            "start": curr.get("start", "192.168.1.100"),
+            "end": curr.get("end", "192.168.1.200"),
+            "lease_time": curr.get("lease_time", "86400"),
+            "ip": curr.get("ip", "192.168.1.1"),
+            "redirect_enable": "0",
+            "redirect_url": ""
+        }
+
+        url = f"{self.base_url}?method=post&module=duster&file=json_lan_set{int(time.time()*1000)}"
+        try:
+            r = requests.post(url, json=payload, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("result") == "success":
+                    return {
+                        "success": True,
+                        "profile": profile,
+                        "dns1": dns1,
+                        "dns2": dns2,
+                        "dns_enable": dns_enable == "1",
+                        "message": "تنظیمات محافظت از کودکان با موفقیت روی مودم اعمال شد"
+                    }
+        except Exception as e:
+            print(f"[ModemClient] set_dns_config error: {e}")
+            return {"success": False, "message": str(e)}
+
+        return {"success": False, "message": "خطا در ذخیره تنظیمات روی مودم"}
+
     def reboot(self) -> bool:
         """Reboots modem."""
         url = f"{self.base_url}?method=get&module=duster&file=json_device_restart{int(time.time()*1000)}"
