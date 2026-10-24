@@ -303,7 +303,9 @@ class ModemClient:
             r = requests.post(url, json=payload, timeout=self.timeout + 5)
             if r.status_code == 200:
                 data = r.json()
-                return data.get("sms_cmd_status_result") == 3
+                # Modem returns sms_cmd_status_result as string "3" on success
+                result = str(data.get("sms_cmd_status_result", ""))
+                return result == "3"
         except Exception as e:
             print(f"[ModemClient] send_sms error: {e}")
         return False
@@ -318,6 +320,15 @@ class ModemClient:
             clean_code = "*" + clean_code
         if not clean_code.endswith("#"):
             clean_code = clean_code + "#"
+
+        # Reset / cancel any previous session first to ensure clean state
+        url_cancel = f"{self.base_url}?method=post&module=duster&file=json_ussd_set{int(time.time()*1000)}"
+        try:
+            requests.post(url_cancel, json={"action": "2", "ussd_param": ""}, timeout=self.timeout)
+        except Exception:
+            pass
+
+        time.sleep(0.4)
 
         url_set = f"{self.base_url}?method=post&module=duster&file=json_ussd_set{int(time.time()*1000)}"
         payload = {
@@ -334,9 +345,7 @@ class ModemClient:
         # Poll ussd_info
         url_info = f"{self.base_url}?method=get&module=duster&file=json_ussd_info{int(time.time()*1000)}"
         start_time = time.time()
-        
-        # Wait a moment before first check
-        time.sleep(1.2)
+        time.sleep(0.8)
         
         while time.time() - start_time < timeout_sec:
             try:
@@ -352,19 +361,12 @@ class ModemClient:
 
                     # Handled states
                     if ussd_type == "2":
-                        # In Shatel / LTE networks, type 2 without string means network rejected or closed session
-                        if "140" in clean_code or "141" in clean_code or "555" in clean_code:
-                            extra_hint = "سیم‌کارت فعال روی مودم شما «شاتل موبایل» است؛ کدهایی مثل *140*11# یا *555# مخصوص ایرانسل هستند و در شاتل کار نمی‌کنند."
-                        elif "100" in clean_code and "1000" not in clean_code:
-                            extra_hint = "سیم‌کارت فعال روی مودم شما «شاتل موبایل» است؛ کد *100# مخصوص همراه‌اول است و در شاتل کار نمی‌کند."
-                        else:
-                            extra_hint = "مودم‌های همراه روی بستر 4G LTE فاقد کانال صوتی (CSFB) هستند و دکل‌های مخابراتی ایران نشست‌های USSD را روی مودم‌های دیتا می‌بندند."
-
                         return (
-                            f"پاسخ از شبکه دریافت نشد (نشست توسط اپراتور بسته شد).\n\n"
-                            f"📌 علت: {extra_hint}\n\n"
-                            f"💡 راهکار پیشنهادی:\n"
-                            f"برای مشاهده لحظه‌ای باقیمانده بسته اینترنت، شارژ ریالی و تاریخ انقضا بدون نیاز به USSD، از سامانه «شاتل موبایل من» به آدرس https://my.shatelmobile.ir استفاده فرمایید."
+                            "نشست USSD توسط دکل شبکه مخابراتی بسته شد (Session Terminated).\n\n"
+                            "علت: سیم‌کارت فعال مودم «شاتل موبایل» است و مودم‌های همراه 4G LTE فاقد کانال صوتی CSFB هستند؛ "
+                            "بنابراین اپراتورهای شبکه در ایران نشست‌های کدهای دستوری USSD را روی مودم‌های همراه مسدود یا فوراً خاتمه می‌دهند.\n\n"
+                            "راهکار پیشنهادی: برای استعلام مانده بسته اینترنت، شارژ ریالی و تاریخ انقضا بدون نیاز به USSD، "
+                            "از سامانه آنلاین «شاتل موبایل من» به نشانی https://my.shatelmobile.ir استفاده فرمایید."
                         )
                     elif ussd_type == "3":
                         return "خطای USSD: نشست توسط کلاینت یا ارتباط دیگری پاسخ داده شد."

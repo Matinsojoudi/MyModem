@@ -593,7 +593,7 @@ HTML_PAGE = """<!DOCTYPE html>
                     <button class="btn btn-primary" onclick="handleUSSD()">شماره‌گیری</button>
                 </div>
                 <label>نتیجه استعلام:</label>
-                <div id="ussd-output">برای مشاهده پاسخ، کد دستوری را وارد کرده و شماره‌گیری کنید.</div>
+                <div id="ussd-output" style="min-height:100px;">برای مشاهده پاسخ، کد دستوری را وارد کرده و شماره‌گیری کنید.</div>
             </div>
         </div>
 
@@ -773,6 +773,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 return;
             }
             btn.disabled = true;
+            statusEl.style.color = 'var(--text-muted)';
             statusEl.innerText = 'در حال ارسال...';
             try {
                 const res = await fetch('/api/send_sms', {
@@ -782,17 +783,21 @@ HTML_PAGE = """<!DOCTYPE html>
                 });
                 const data = await res.json();
                 if (data.success) {
-                    statusEl.innerText = ' با موفقیت ارسال شد.';
+                    statusEl.innerText = 'پیامک با موفقیت ارسال شد.';
                     statusEl.style.color = 'var(--success)';
                     document.getElementById('send-text').value = '';
+                    document.getElementById('send-phone').value = '';
                 } else {
-                    statusEl.innerText = ' خطا در ارسال پیامک.';
+                    statusEl.innerText = 'ارسال ناموفق بود. لطفاً اتصال مودم را بررسی کنید.';
                     statusEl.style.color = 'var(--danger)';
                 }
             } catch (e) {
-                statusEl.innerText = ' خطا در برقراری ارتباط.';
+                statusEl.innerText = 'خطا در برقراری ارتباط با سرور.';
+                statusEl.style.color = 'var(--danger)';
             } finally {
                 btn.disabled = false;
+                // Clear status message after 5 seconds
+                setTimeout(() => { statusEl.innerText = ''; }, 5000);
             }
         }
 
@@ -804,7 +809,8 @@ HTML_PAGE = """<!DOCTYPE html>
             const code = document.getElementById('ussd-code').value.trim();
             const output = document.getElementById('ussd-output');
             if (!code) return;
-            output.innerText = 'در حال ارسال کد به شبکه و دریافت پاسخ... (چند ثانیه صبور باشید)';
+            output.style.color = 'var(--text-muted)';
+            output.innerHTML = 'در حال ارسال کد به شبکه... (چند ثانیه صبور باشید)';
             try {
                 const res = await fetch('/api/ussd', {
                     method: 'POST',
@@ -812,9 +818,20 @@ HTML_PAGE = """<!DOCTYPE html>
                     body: JSON.stringify({code})
                 });
                 const data = await res.json();
-                output.innerText = data.result || 'بدون پاسخ';
+                const result = data.result || 'پاسخی دریافت نشد.';
+                // Make URLs clickable (keep natural newlines since container uses white-space: pre-wrap)
+                const formatted = result
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/(https?:\\/\\/[^\\s]+)/g, '<a href="$1" target="_blank" style="color:var(--accent); text-decoration: underline;">$1</a>');
+                // Color based on success or error
+                const isError = result.includes('بسته شد') || result.includes('خطا') || result.includes('پاسخ نشد');
+                output.style.color = isError ? 'var(--warning)' : 'var(--text-main)';
+                output.innerHTML = formatted;
             } catch (e) {
-                output.innerText = 'خطا در ارتباط با مودم.';
+                output.style.color = 'var(--danger)';
+                output.innerHTML = 'خطا در برقراری ارتباط با مودم.';
             }
         }
 
