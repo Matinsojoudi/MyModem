@@ -564,10 +564,17 @@ def build_room_page(room_id: str, room_title: str) -> str:
         }};
 
         async function joinRoom() {{
-            const nick = (document.getElementById('nickname-input').value || '').trim();
-            if (!nick) return;
+            const inp = document.getElementById('nickname-input');
+            const nick = (inp ? inp.value : '').trim();
+            if (!nick) {{
+                alert('لطفاً نام یا نام مستعار خود را وارد کنید');
+                if (inp) inp.focus();
+                return;
+            }}
             myName = nick;
             localStorage.setItem('lan_nick', myName);
+            const btn = document.querySelector('.btn-join');
+            if (btn) {{ btn.innerText = 'در حال ورود...'; btn.disabled = true; }}
 
             try {{
                 const res = await fetch('/api/lan/chat/join', {{
@@ -585,9 +592,13 @@ def build_room_page(room_id: str, room_title: str) -> str:
                         lastMsgSeq = data.next_msg_seq || 0;
                     }}
                     startPolling();
+                }} else {{
+                    alert(data.error || 'خطا در ورود به اتاق گفتگو');
                 }}
             }} catch(e) {{
-                console.error("Join failed", e);
+                alert('خطا در اتصال به سرور شبکه محلی: ' + e.message);
+            }} finally {{
+                if (btn) {{ btn.innerText = 'ورود به چت‌روم'; btn.disabled = false; }}
             }}
         }}
 
@@ -709,12 +720,12 @@ def build_room_page(room_id: str, room_title: str) -> str:
         function checkMediaDevicesSupported() {{
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
                 if (location.protocol !== 'https:') {{
-                    if (confirm("مرورگرهای گوشی (کروم و سافاری) به دلایل امنیتی فقط روی اتصال امن (HTTPS) اجازه دسترسی به میکروفون و دوربین را می‌دهند.\n\nآیا می‌خواهید به نسخه امن HTTPS منتقل شوید؟")) {{
+                    if (confirm("مرورگرهای گوشی برای فعال‌سازی میکروفون و دوربین نیازمند اتصال امن HTTPS هستند. آیا مایلید به نسخه HTTPS منتقل شوید؟")) {{
                         switchToHttps();
                     }}
                     return false;
                 }} else {{
-                    alert("دسترسی به دوربین/میکروفون در این مرورگر پشتیبانی نمی‌شود یا مسدود شده است.");
+                    alert("دسترسی به دوربین و میکروفون توسط مرورگر مسدود شده است.");
                     return false;
                 }}
             }}
