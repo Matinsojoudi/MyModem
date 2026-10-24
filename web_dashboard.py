@@ -1639,11 +1639,15 @@ HTML_PAGE = """<!DOCTYPE html>
 
             let html = '';
             list.forEach(d => {
-                const isOnline = d.status === 'online';
-                const isBlocked = d.status === 'blocked';
-                const isOffline = d.status === 'offline';
+                const isOnline = d.status === 'online' || d.is_online === true;
+                const isBlocked = d.status === 'blocked' || d.is_blocked === true;
+                const isOffline = !isOnline && !isBlocked;
 
-                const isSelf = (d.ip && (d.ip === currentClientIp || (currentClientIp === '127.0.0.1' && (d.ip === '192.168.1.198' || (d.name && d.name.toLowerCase().includes('macbook'))))));
+                // Accurately detect if this card belongs to the user accessing the dashboard
+                const isSelf = Boolean(
+                    (d.is_host && (currentClientIp === '127.0.0.1' || currentClientIp === d.ip)) ||
+                    (d.ip && d.ip !== 'آفلاین' && d.ip !== 'NA' && d.ip === currentClientIp)
+                );
 
                 let cardClass = isOnline ? 'is-online' : (isBlocked ? 'is-blocked' : 'is-offline');
                 if (isSelf) cardClass += ' is-self';

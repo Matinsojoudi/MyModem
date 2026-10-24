@@ -12,6 +12,8 @@ Provides methods for:
 """
 
 import re
+import socket
+import subprocess
 import requests
 import json
 import time
@@ -740,6 +742,32 @@ class ModemClient:
         """
         Fetches connected Wi-Fi devices, connection history, data consumption, and blocked status.
         """
+        # Detect host machine (Mac) LAN IP and MAC addresses to accurately mark "این دستگاه (شما)"
+        host_ip = "192.168.1.199"
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("192.168.1.1", 80))
+            host_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            pass
+
+        host_macs = set()
+        try:
+            out = subprocess.check_output(["ifconfig"], text=True)
+            for line in out.splitlines():
+                m = re.search(r"ether\s+([0-9a-fA-F:]{17})", line)
+                if m:
+                    host_macs.add(m.group(1).lower())
+        except Exception:
+            pass
+
+        host_name = "مک‌بوک شما"
+        try:
+            host_name = socket.gethostname().split(".")[0]
+        except Exception:
+            pass
+
         url = f"{self.base_url}?method=get&module=duster&file=json_device_management_info{int(time.time()*1000)}"
         devices = []
         try:
@@ -762,8 +790,16 @@ class ModemClient:
                             clean_name = bytes.fromhex(clean_hex).decode("utf-8", errors="ignore").strip()
                     except Exception:
                         clean_name = raw_n.strip()
+
+                    # Status: 1=Online, 0=Offline/History, 2=Blocked
+                    is_online = (status == "1") and (ip != "NA") and bool(ip)
+                    is_blocked = (status == "2")
+                    status_str = "online" if is_online else ("blocked" if is_blocked else "offline")
+                    status_text = "آنلاین" if is_online else ("مسدود شده" if is_blocked else "سابقه (آفلاین)")
+
+                    is_host_device = (mac.lower() in host_macs) or (ip == host_ip)
                     if not clean_name or clean_name.lower() == mac.lower():
-                        clean_name = "دستگاه بی‌نام"
+                        clean_name = f"{host_name} (این سیستم)" if is_host_device else "دستگاه بی‌نام"
 
                     duration_sec = int(d.get("tf", 0)) if str(d.get("tf", "")).isdigit() else 0
                     
@@ -803,18 +839,17 @@ class ModemClient:
                             parts.append(f"{s} ثانیه")
                         return " و ".join(parts)
 
-                    # Status: 1=Online, 0=Offline/History, 2=Blocked
-                    is_online = (status == "1") and (ip != "NA") and bool(ip)
-                    is_blocked = (status == "2")
-
                     devices.append({
                         "id": d.get("i", ""),
                         "mac": mac,
                         "ip": ip if (ip != "NA" and ip) else "آفلاین",
                         "name": clean_name,
+                        "status": status_str,
+                        "status_text": status_text,
                         "status_code": status,
                         "is_online": is_online,
                         "is_blocked": is_blocked,
+                        "is_host": is_host_device,
                         "conn_type": d.get("ct", "WIFI"),
                         "duration_sec": duration_sec,
                         "duration_str": fmt_dur(duration_sec),
@@ -829,8 +864,11 @@ class ModemClient:
         except Exception as e:
             print(f"[ModemClient] get_connected_devices error: {e}")
 
-        # Sort: online first, then blocked, then by total traffic descending
-        devices.sort(key=lambda x: (not x["is_online"], not x["is_blocked"], -x["total_bytes"]))
+        # Sort: online devices first, then blocked, then offline by traffic
+        devices.sort(key=lambda x: (
+            0 if x["status"] == "online" else (1 if x["status"] == "blocked" else 2),
+            -x["total_bytes"]
+        ))
 
         online_count = sum(1 for d in devices if d["is_online"])
         blocked_count = sum(1 for d in devices if d["is_blocked"])
@@ -839,7 +877,9 @@ class ModemClient:
             "devices": devices,
             "total_count": len(devices),
             "online_count": online_count,
-            "blocked_count": blocked_count
+            "blocked_count": blocked_count,
+            "host_ip": host_ip,
+            "host_macs": list(host_macs)
         }
 
     def set_device_management(self, action: str, mac: str = "") -> bool:
