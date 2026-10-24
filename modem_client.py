@@ -82,18 +82,36 @@ def parse_modem_time_to_shamsi(raw_time: str) -> str:
 
 
 def uni_decode(hex_str: str) -> str:
-    """Decodes UCS2 / UTF-16BE hex string from modem into Python string with newline normalization."""
+    """
+    Decodes UCS2 / UTF-16BE hex strings from modem into Python string.
+    Supports single-encoded, double-encoded (nested hex) strings, and normalizes Persian characters.
+    """
     if not hex_str:
         return ""
-    try:
-        clean_hex = hex_str.strip()
-        if len(clean_hex) % 2 != 0:
-            clean_hex = clean_hex[:-1]
-        raw_bytes = bytes.fromhex(clean_hex)
-        decoded = raw_bytes.decode("utf-16-be", errors="replace")
-        return decoded.replace("\r\n", "\n").replace("\r", "\n")
-    except Exception:
-        return hex_str
+    s = str(hex_str).strip()
+
+    # Recursively decode up to 3 layers in case of nested hex encoding (e.g. 00300036... -> 06450627... -> Mama)
+    for _ in range(3):
+        clean = s.replace(" ", "")
+        if len(clean) >= 4 and len(clean) % 2 == 0 and all(c in "0123456789abcdefABCDEF" for c in clean):
+            try:
+                b = bytes.fromhex(clean)
+                decoded = b.decode("utf-16-be", errors="strict")
+                # If decoded consists of printable characters or newlines, accept it and continue loop
+                if decoded and all(ord(c) >= 32 or c in "\n\r\t" for c in decoded):
+                    s = decoded.strip()
+                    continue
+            except Exception:
+                pass
+        break
+
+    # Normalize Persian & Arabic characters
+    s = s.replace("\u0643", "\u06a9")  # ك -> ک
+    s = s.replace("\u064a", "\u06cc")  # ي -> ی
+    s = s.replace("\u0649", "\u06cc")  # ى -> ی
+    s = s.replace("\u0626", "\u06cc")  # ئ -> ی
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    return s.strip()
 
 
 def uni_encode(text: str) -> str:
@@ -110,8 +128,6 @@ def get_sms_time_str() -> str:
     return now.strftime("%y,%m,%d,%H,%M,%S,+3.5")
 
 
-def normalize_phone(phone: str) -> str:
-    """Normalizes Iranian phone numbers (e.g. +98912..., 0098912..., 98912..., 912... -> 0912...)."""
 def extract_name_and_number(raw_str: str) -> Tuple[str, str]:
     """
     Extracts clean contact name and phone number from strings formatted like:
