@@ -693,7 +693,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const initials = (conv.peer_name ? conv.peer_name.slice(0, 2) : conv.peer_number.slice(-3)).toUpperCase();
             document.getElementById('active-chat-avatar').innerText = initials;
             document.getElementById('active-chat-name').innerText = conv.display_name;
-            document.getElementById('active-chat-sub').innerText = conv.peer_number + (conv.peer_name ? ` (${conv.peer_name})` : '');
+            document.getElementById('active-chat-sub').innerText = conv.peer_number;
             
             const btnSave = document.getElementById('btn-save-contact');
             if (btnSave) {
@@ -981,6 +981,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 const hasName = c.name && c.name.trim() !== '' && c.name !== 'بی‌نام';
                 const displayName = hasName ? c.name : c.number;
                 const initials = displayName.slice(0, 2);
+                const deleteId = (c.all_ids && c.all_ids.length > 0) ? c.all_ids.join(',') : c.id;
                 return `
                 <div class="contact-card">
                     <div class="avatar" style="background:linear-gradient(135deg, #6366f1, #0284c7);">${initials}</div>
@@ -990,7 +991,7 @@ HTML_PAGE = """<!DOCTYPE html>
                     </div>
                     <div class="contact-actions">
                         <button class="btn-sm btn-primary" onclick="openChatWithContact('${c.normalized_number}')" title="شروع گفتگو">چت</button>
-                        <button class="btn-sm btn-danger" onclick="deleteContact('${c.id}')" title="حذف مخاطب">حذف</button>
+                        <button class="btn-sm btn-danger" onclick="deleteContact('${deleteId}')" title="حذف مخاطب">حذف</button>
                     </div>
                 </div>
             `;}).join('');

@@ -11,11 +11,12 @@ Provides methods for:
 - Device reboot
 """
 
+import re
 import requests
 import json
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 MODEM_IP = "192.168.1.1"
 BASE_URL = f"http://{MODEM_IP}/xml_action.cgi"
@@ -107,10 +108,45 @@ def get_sms_time_str() -> str:
 
 def normalize_phone(phone: str) -> str:
     """Normalizes Iranian phone numbers (e.g. +98912..., 0098912..., 98912..., 912... -> 0912...)."""
+def extract_name_and_number(raw_str: str) -> Tuple[str, str]:
+    """
+    Extracts clean contact name and phone number from strings formatted like:
+    - 'متینسجودی;09145149146'
+    - 'متینسجودی;989145149146'
+    - ';09145149146'
+    - '+989145149146'
+    - 'متین سجودی'
+    Returns (clean_name, clean_number).
+    """
+    if not raw_str:
+        return "", ""
+    s = str(raw_str).strip()
+    if ";" in s:
+        parts = [p.strip() for p in s.split(";") if p.strip()]
+        digits_part = ""
+        text_parts = []
+        for p in parts:
+            digits = re.sub(r'[^\d\+]', '', p)
+            if len(digits) >= 3 and len(digits) >= len(p) - 2:
+                digits_part = p
+            else:
+                text_parts.append(p)
+        clean_text = " ".join(text_parts).strip()
+        return clean_text, digits_part
+    
+    digits = re.sub(r'[^\d\+]', '', s)
+    if len(digits) >= 3 and len(digits) >= len(s) - 2:
+        return "", s
+    return s, ""
+
+
+def normalize_phone(phone: str) -> str:
+    """Normalizes Iranian mobile numbers to standard 09xxxxxxxxx format."""
     if not phone:
         return ""
-    import re
-    clean = re.sub(r'[\s\-\(\)\.\+]', '', str(phone)).lstrip(';')
+    _, num_part = extract_name_and_number(str(phone))
+    target = num_part if num_part else str(phone)
+    clean = re.sub(r'[\s\-\(\)\.\+]', '', target).lstrip(';')
     if clean.startswith('98') and len(clean) >= 12:
         clean = '0' + clean[2:]
     elif clean.startswith('0098'):
@@ -200,7 +236,10 @@ class ModemClient:
         decoded_messages = []
         unread_count = 0
         for item in unique_raw:
-            sender = uni_decode(item.get("from", "")).lstrip(";")
+            raw_sender = uni_decode(item.get("from", "")).lstrip(";")
+            ext_name, ext_num = extract_name_and_number(raw_sender)
+            sender = ext_num if ext_num else raw_sender
+            sender_name = ext_name if ext_name else ""
             text = uni_decode(item.get("subject", ""))
             recv_time_raw = item.get("received", "")
             recv_time_shamsi = parse_modem_time_to_shamsi(recv_time_raw)
@@ -227,6 +266,7 @@ class ModemClient:
             decoded_messages.append({
                 "id": msg_id,
                 "sender": sender,
+                "sender_name": sender_name,
                 "text": text,
                 "time": recv_time_shamsi,
                 "raw_time": recv_time_raw,
@@ -465,10 +505,20 @@ class ModemClient:
             r = requests.post(url, json=payload, timeout=self.timeout)
             if r.status_code == 200:
                 entries = r.json().get("pb_entries", [])
+                temp_contacts = []
                 for e in entries:
                     raw_name = e.get("pbm_name", "")
-                    name = uni_decode(raw_name).strip() if raw_name else "بی‌نام"
+                    decoded_name = uni_decode(raw_name).strip() if raw_name else "بی‌نام"
+                    ext_name, ext_num = extract_name_and_number(decoded_name)
+                    clean_name = ext_name if ext_name else decoded_name
+                    clean_name = clean_name.replace(";", " ").strip()
+                    if not clean_name:
+                        clean_name = "بی‌نام"
+
                     number = e.get("pbm_number", "").strip()
+                    if not number and ext_num:
+                        number = ext_num
+
                     loc = e.get("pbm_location", "0")
                     storage = "سیم‌کارت" if loc == "0" else "دستگاه"
                     group = e.get("pbm_group", "common")
@@ -479,15 +529,38 @@ class ModemClient:
                         "colleague": "همکاران"
                     }.get(group, group)
                     
-                    contacts.append({
+                    norm = normalize_phone(number)
+                    temp_contacts.append({
                         "id": e.get("pbm_id"),
-                        "name": name,
+                        "name": clean_name,
                         "number": number,
-                        "normalized_number": normalize_phone(number),
+                        "normalized_number": norm,
                         "group": group_fa,
                         "storage": storage,
                         "location": loc
                     })
+
+                # Deduplicate contacts by normalized_number so different prefixes (98 vs 09) don't create multiple cards
+                deduped = {}
+                for c in temp_contacts:
+                    key = c["normalized_number"] if c["normalized_number"] else c["number"]
+                    if not key:
+                        contacts.append(c)
+                        continue
+                    if key not in deduped:
+                        c["all_ids"] = [c["id"]]
+                        deduped[key] = c
+                    else:
+                        existing = deduped[key]
+                        if c["id"] not in existing["all_ids"]:
+                            existing["all_ids"].append(c["id"])
+                        # If existing name is shorter or 'بی‌نام', upgrade to the longer/fuller name
+                        if existing["name"] == "بی‌نام" or (c["name"] != "بی‌نام" and len(c["name"]) > len(existing["name"])):
+                            existing["name"] = c["name"]
+                            existing["id"] = c["id"]
+                            existing["number"] = c["number"]
+                
+                contacts = list(deduped.values())
                 self._phonebook_cache = contacts
                 self._phonebook_time = now
         except Exception as e:
@@ -524,7 +597,7 @@ class ModemClient:
         return False
 
     def delete_contact(self, contact_id: str) -> bool:
-        """Deletes a contact by pbm_id from modem phonebook."""
+        """Deletes a contact by pbm_id from modem phonebook (supports multiple comma-separated IDs)."""
         self._phonebook_time = 0
         url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
         del_id = contact_id if contact_id.endswith(",") else f"{contact_id},"
@@ -556,12 +629,16 @@ class ModemClient:
             r = requests.post(url, json=payload, timeout=self.timeout)
             if r.status_code == 200:
                 for m in r.json().get("message_list", []):
-                    to_num = uni_decode(m.get("from", "")).lstrip(";")
+                    raw_to = uni_decode(m.get("from", "")).lstrip(";")
+                    ext_name, ext_num = extract_name_and_number(raw_to)
+                    to_num = ext_num if ext_num else raw_to
+                    sender_name = ext_name if ext_name else ""
                     text = uni_decode(m.get("subject", ""))
                     raw_time = m.get("received", "")
                     sent_messages.append({
                         "id": m.get("index"),
                         "sender": to_num,
+                        "sender_name": sender_name,
                         "text": text,
                         "time": parse_modem_time_to_shamsi(raw_time),
                         "raw_time": raw_time,
@@ -583,8 +660,9 @@ class ModemClient:
         contacts_map = {}
         for c in contacts:
             norm = c.get("normalized_number")
-            if norm and c.get("name"):
-                contacts_map[norm] = c.get("name")
+            c_name = c.get("name", "").strip()
+            if norm and c_name and c_name != "بی‌نام":
+                contacts_map[norm] = c_name
 
         # 2. Incoming messages
         inbox_data = self.get_sms_list(page=1, data_per_page=50)
@@ -598,15 +676,30 @@ class ModemClient:
         # 4. Group by normalized peer
         threads = {}
         for m in inbox_msgs:
-            peer = normalize_phone(m.get("sender", ""))
+            sender_str = m.get("sender", "")
+            ext_name, ext_num = extract_name_and_number(sender_str)
+            target_num = ext_num if ext_num else sender_str
+            peer = normalize_phone(target_num)
             if not peer:
-                peer = m.get("sender", "نامشخص")
+                peer = target_num or "نامشخص"
+            
+            # If name extracted from SMS header and not yet in contacts_map
+            if ext_name and ext_name != "بی‌نام" and peer not in contacts_map:
+                contacts_map[peer] = ext_name
+
             threads.setdefault(peer, []).append(m)
 
         for s in sent_msgs:
-            peer = normalize_phone(s.get("sender", ""))
+            sender_str = s.get("sender", "")
+            ext_name, ext_num = extract_name_and_number(sender_str)
+            target_num = ext_num if ext_num else sender_str
+            peer = normalize_phone(target_num)
             if not peer:
-                peer = s.get("sender", "نامشخص")
+                peer = target_num or "نامشخص"
+
+            if ext_name and ext_name != "بی‌نام" and peer not in contacts_map:
+                contacts_map[peer] = ext_name
+
             threads.setdefault(peer, []).append(s)
 
         conversations = []
