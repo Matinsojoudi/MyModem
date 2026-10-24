@@ -784,11 +784,13 @@ HTML_PAGE = """<!DOCTYPE html>
             if (!text) {
                 return { length: 0, isUnicode: false, segmentCount: 0, remainingInSegment: 70 };
             }
-            // Standard GSM 7-bit regex
-            const gsmRegex = /^[@£$¥èéùìòÇ
-Øø
-ÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&'()*+,\\-.\\/0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà^{}\\[~\\]|€]*$/;
-            const isUnicode = !gsmRegex.test(text);
+            let isUnicode = false;
+            for (let i = 0; i < text.length; i++) {
+                if (text.charCodeAt(i) > 127) {
+                    isUnicode = true;
+                    break;
+                }
+            }
             const length = text.length;
             let segmentCount = 1;
             let remainingInSegment = 0;
@@ -815,8 +817,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
         function parseBulkNumbers(raw) {
             if (!raw) return [];
-            const tokens = raw.split(/[
-,; 	]+/);
+            const tokens = raw.split(/[\\r\\n,;\\s]+/);
             const valid = [];
             const seen = new Set();
             tokens.forEach(t => {
