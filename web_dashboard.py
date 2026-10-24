@@ -21,17 +21,34 @@ import mimetypes
 import re
 import socket
 import datetime
+import ssl
+import threading
+import subprocess
 from modem_client import ModemClient
 from auth_manager import auth_manager
 from lan_chat_manager import lan_chat_manager, CHAT_UPLOADS_DIR, get_safe_chat_file_path
 from room_page import build_room_page
 
 PORT = 8080
+HTTPS_PORT = 8443
+CERT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.crt")
+KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.key")
 client = ModemClient()
 
 SHARED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shared_files")
 CLIPBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".shared_clipboard.json")
 os.makedirs(SHARED_DIR, exist_ok=True)
+
+def ensure_ssl_certs():
+    if not (os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE)):
+        try:
+            subprocess.run([
+                "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                "-keyout", KEY_FILE, "-out", CERT_FILE,
+                "-days", "365", "-nodes", "-subj", "/CN=MyModemLAN"
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
 def get_local_lan_ip():
     try:
@@ -3992,9 +4009,24 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
+def run_https_server():
+    ensure_ssl_certs()
+    if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
+        try:
+            ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ssl_ctx.load_cert_chain(certfile=CERT_FILE, keyfile=KEY_FILE)
+            with ThreadedHTTPServer(("0.0.0.0", HTTPS_PORT), ModemDashboardHandler) as httpsd:
+                httpsd.socket = ssl_ctx.wrap_socket(httpsd.socket, server_side=True)
+                print(f"Modem Dashboard HTTPS running at https://0.0.0.0:{HTTPS_PORT}")
+                httpsd.serve_forever()
+        except Exception as e:
+            print(f"HTTPS server error: {e}")
+
+
 def run_server():
+    threading.Thread(target=run_https_server, daemon=True).start()
     with ThreadedHTTPServer(("0.0.0.0", PORT), ModemDashboardHandler) as httpd:
-        print(f"Modem Dashboard running at http://0.0.0.0:{PORT}")
+        print(f"Modem Dashboard HTTP running at http://0.0.0.0:{PORT}")
         httpd.serve_forever()
 
 

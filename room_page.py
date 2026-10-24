@@ -470,6 +470,9 @@ def build_room_page(room_id: str, room_title: str) -> str:
             </div>
         </div>
         <div class="header-actions">
+            <button id="btn-https-switch" class="btn-call" style="display:none;background:rgba(245,158,11,0.15);color:#fbbf24;border-color:rgba(245,158,11,0.3);" onclick="switchToHttps()" title="جهت دسترسی به دوربین و میکروفون روی گوشی">
+                🔒 فعال‌سازی تماس (HTTPS)
+            </button>
             <button class="btn-call voice" onclick="initiateCall('voice')">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
                 تماس صوتی
@@ -550,6 +553,10 @@ def build_room_page(room_id: str, room_title: str) -> str:
         let activeCallWith = null;
 
         window.onload = () => {{
+            if (location.protocol !== 'https:') {{
+                const btnHttps = document.getElementById('btn-https-switch');
+                if (btnHttps) btnHttps.style.display = 'inline-flex';
+            }}
             if (myName) {{
                 document.getElementById('nickname-input').value = myName;
                 joinRoom();
@@ -694,7 +701,28 @@ def build_room_page(room_id: str, room_title: str) -> str:
         // ── WebRTC Calling over LAN ──────────────────────────────
         const rtcConfig = {{ iceServers: [] }}; // Direct LAN p2p, zero external stun
 
+        function switchToHttps() {{
+            const httpsUrl = 'https://' + location.hostname + ':8443' + location.pathname + location.search;
+            location.href = httpsUrl;
+        }}
+
+        function checkMediaDevicesSupported() {{
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
+                if (location.protocol !== 'https:') {{
+                    if (confirm("مرورگرهای گوشی (کروم و سافاری) به دلایل امنیتی فقط روی اتصال امن (HTTPS) اجازه دسترسی به میکروفون و دوربین را می‌دهند.\n\nآیا می‌خواهید به نسخه امن HTTPS منتقل شوید؟")) {{
+                        switchToHttps();
+                    }}
+                    return false;
+                }} else {{
+                    alert("دسترسی به دوربین/میکروفون در این مرورگر پشتیبانی نمی‌شود یا مسدود شده است.");
+                    return false;
+                }}
+            }}
+            return true;
+        }}
+
         async function initiateCall(type) {{
+            if (!checkMediaDevicesSupported()) return;
             const other = participants.find(p => !p.is_self);
             if (!other) {{
                 alert("کاربر دیگری در این اتاق آنلاین نیست!");
@@ -758,6 +786,10 @@ def build_room_page(room_id: str, room_title: str) -> str:
         async function acceptCall() {{
             document.getElementById('modal-ring').style.display = 'none';
             if (!pendingCall) return;
+            if (!checkMediaDevicesSupported()) {{
+                rejectCall();
+                return;
+            }}
             const {{ from_id, data }} = pendingCall;
             activeCallWith = from_id;
 
