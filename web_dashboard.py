@@ -1202,10 +1202,16 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
         path = url_parsed.path
 
         if path == "/" or path == "/index.html":
+            encoded = HTML_PAGE.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Connection", "close")
             self.end_headers()
-            self.wfile.write(HTML_PAGE.encode("utf-8"))
+            try:
+                self.wfile.write(encoded)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             return
 
         elif path == "/api/status":
@@ -1300,19 +1306,29 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
         self.send_error(404, "Not Found")
 
     def send_json(self, data):
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+        try:
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def log_message(self, format, *args):
         return
 
 
+class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def run_server():
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("127.0.0.1", PORT), ModemDashboardHandler) as httpd:
+    with ThreadedHTTPServer(("127.0.0.1", PORT), ModemDashboardHandler) as httpd:
         print(f"Modem Dashboard running at http://127.0.0.1:{PORT}")
         httpd.serve_forever()
 

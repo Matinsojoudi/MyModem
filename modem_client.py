@@ -125,6 +125,8 @@ class ModemClient:
         self.ip = ip
         self.base_url = f"http://{ip}/xml_action.cgi"
         self.timeout = timeout
+        self._phonebook_cache = None
+        self._phonebook_time = 0
 
     def get_status(self) -> Optional[Dict[str, Any]]:
         """Fetches live modem status (battery, network, clients, unread count)."""
@@ -445,9 +447,13 @@ class ModemClient:
                 
         return "زمان انتظار برای دریافت پاسخ USSD از سمت شبکه به پایان رسید."
 
-    def get_phonebook(self) -> List[Dict[str, Any]]:
-        """Fetches all contacts from modem phonebook (SIM + Device)."""
-        url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
+    def get_phonebook(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Fetches all contacts from modem phonebook (SIM + Device) with 30s cache."""
+        now = time.time()
+        if not force_refresh and self._phonebook_cache is not None and (now - self._phonebook_time < 30):
+            return self._phonebook_cache
+
+        url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(now*1000)}"
         payload = {
             "pb_action": "pb_get_all",
             "location": "2",
@@ -482,12 +488,15 @@ class ModemClient:
                         "storage": storage,
                         "location": loc
                     })
+                self._phonebook_cache = contacts
+                self._phonebook_time = now
         except Exception as e:
             print(f"[ModemClient] get_phonebook error: {e}")
-        return contacts
+        return contacts if contacts else (self._phonebook_cache or [])
 
     def add_contact(self, name: str, number: str, group: str = "common", location: str = "0") -> bool:
         """Adds a contact to modem phonebook (location 0=SIM, 1=Device)."""
+        self._phonebook_time = 0
         url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
         payload = {
             "pb_action": "pbm_contact_add",
@@ -507,6 +516,7 @@ class ModemClient:
 
     def delete_contact(self, contact_id: str) -> bool:
         """Deletes a contact by pbm_id from modem phonebook."""
+        self._phonebook_time = 0
         url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
         del_id = contact_id if contact_id.endswith(",") else f"{contact_id},"
         payload = {
