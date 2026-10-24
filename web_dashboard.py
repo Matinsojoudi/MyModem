@@ -499,12 +499,15 @@ HTML_PAGE = """<!DOCTYPE html>
         <div class="modal-card">
             <h3 style="font-size:16px; font-weight:800; margin-bottom:14px;">افزودن مخاطب به مودم</h3>
             <div class="form-row">
-                <label>نام و نام خانوادگی:</label>
-                <input type="text" id="add-contact-name" placeholder="مثلاً: علی محمدی">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <label style="margin-bottom:0;">نام و نام خانوادگی:</label>
+                    <span id="add-contact-char-limit" style="font-size:11px; color:var(--text-muted);">حداکثر ۱۴ کاراکتر</span>
+                </div>
+                <input type="text" id="add-contact-name" placeholder="مثلاً: علی محمدی" oninput="updateAddContactLimit()">
             </div>
             <div class="form-row">
                 <label>شماره موبایل:</label>
-                <input type="text" id="add-contact-number" placeholder="09xxxxxxxxx">
+                <input type="text" id="add-contact-number" placeholder="09xxxxxxxxx" maxlength="25">
             </div>
             <div class="form-row">
                 <label>دسته‌بندی:</label>
@@ -517,9 +520,9 @@ HTML_PAGE = """<!DOCTYPE html>
             </div>
             <div class="form-row">
                 <label>محل ذخیره‌سازی:</label>
-                <select id="add-contact-loc">
-                    <option value="0">سیم‌کارت (SIM)</option>
-                    <option value="1">حافظه مودم (Device)</option>
+                <select id="add-contact-loc" onchange="updateAddContactLimit()">
+                    <option value="0">سیم‌کارت (SIM - حداکثر ۱۴ کاراکتر فارسی)</option>
+                    <option value="1">حافظه مودم (Device - حداکثر ۳۰ کاراکتر)</option>
                 </select>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
@@ -974,20 +977,23 @@ HTML_PAGE = """<!DOCTYPE html>
                 grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:30px; color:var(--text-muted);">مخاطبی در دفترچه تلفن مودم یافت نشد.</div>';
                 return;
             }
-            grid.innerHTML = contacts.map(c => `
+            grid.innerHTML = contacts.map(c => {
+                const hasName = c.name && c.name.trim() !== '' && c.name !== 'بی‌نام';
+                const displayName = hasName ? c.name : c.number;
+                const initials = displayName.slice(0, 2);
+                return `
                 <div class="contact-card">
-                    <div class="avatar" style="background:linear-gradient(135deg, #6366f1, #0284c7);">${c.name.slice(0, 2)}</div>
+                    <div class="avatar" style="background:linear-gradient(135deg, #6366f1, #0284c7);">${initials}</div>
                     <div>
-                        <div style="font-weight:700; font-size:14px; margin-bottom:2px;">${c.name}</div>
-                        <div style="font-size:12px; color:var(--text-muted); direction:ltr; text-align:right;">${c.number}</div>
-                        <div style="font-size:10px; color:var(--accent); margin-top:2px;">${c.group} • ${c.storage}</div>
+                        <div style="font-weight:700; font-size:14px; margin-bottom:4px;">${displayName}</div>
+                        <div style="font-size:11px; color:var(--accent);">${c.group} • ${c.storage}</div>
                     </div>
                     <div class="contact-actions">
                         <button class="btn-sm btn-primary" onclick="openChatWithContact('${c.normalized_number}')" title="شروع گفتگو">چت</button>
                         <button class="btn-sm btn-danger" onclick="deleteContact('${c.id}')" title="حذف مخاطب">حذف</button>
                     </div>
                 </div>
-            `).join('');
+            `;}).join('');
         }
 
         function filterContactsList() {
@@ -1055,7 +1061,34 @@ HTML_PAGE = """<!DOCTYPE html>
             }
         }
 
-        function openAddContactModal() { document.getElementById('modal-add-contact').classList.add('active'); }
+        function updateAddContactLimit() {
+            const nameInput = document.getElementById('add-contact-name');
+            const locSelect = document.getElementById('add-contact-loc');
+            const limitLabel = document.getElementById('add-contact-char-limit');
+            if (!nameInput || !locSelect || !limitLabel) return;
+            const isSim = locSelect.value === '0';
+            const val = nameInput.value || '';
+
+            let isUnicode = false;
+            for (let i = 0; i < val.length; i++) {
+                if (val.charCodeAt(i) > 127) {
+                    isUnicode = true;
+                    break;
+                }
+            }
+
+            const maxLen = isSim ? (isUnicode ? 14 : 20) : 30;
+            nameInput.maxLength = maxLen;
+
+            const storageName = isSim ? (isUnicode ? 'سیم‌کارت فارسی' : 'سیم‌کارت انگلیسی') : 'حافظه دستگاه';
+            limitLabel.innerText = `${val.length} / ${maxLen} کاراکتر (${storageName})`;
+            limitLabel.style.color = (maxLen - val.length <= 2) ? 'var(--danger)' : 'var(--text-muted)';
+        }
+
+        function openAddContactModal() {
+            document.getElementById('modal-add-contact').classList.add('active');
+            updateAddContactLimit();
+        }
         function closeAddContactModal() { document.getElementById('modal-add-contact').classList.remove('active'); }
         async function submitAddContact() {
             const name = document.getElementById('add-contact-name').value.trim();
@@ -1066,6 +1099,20 @@ HTML_PAGE = """<!DOCTYPE html>
                 alert('لطفاً نام و شماره تلفن را وارد کنید.');
                 return;
             }
+
+            let isUnicode = false;
+            for (let i = 0; i < name.length; i++) {
+                if (name.charCodeAt(i) > 127) {
+                    isUnicode = true;
+                    break;
+                }
+            }
+            const maxLen = (location === '0') ? (isUnicode ? 14 : 20) : 30;
+            if (name.length > maxLen) {
+                alert(`نام مخاطب برای ذخیره در ${location === '0' ? 'سیم‌کارت' : 'حافظه دستگاه'} نمی‌تواند بیشتر از ${maxLen} کاراکتر باشد.`);
+                return;
+            }
+
             try {
                 const res = await fetch('/api/contacts/add', {
                     method: 'POST',

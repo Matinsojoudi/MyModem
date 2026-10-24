@@ -495,13 +495,22 @@ class ModemClient:
         return contacts if contacts else (self._phonebook_cache or [])
 
     def add_contact(self, name: str, number: str, group: str = "common", location: str = "0") -> bool:
-        """Adds a contact to modem phonebook (location 0=SIM, 1=Device)."""
+        """Adds a contact to modem phonebook (location 0=SIM, 1=Device) with character limits."""
         self._phonebook_time = 0
+        
+        # Enforce SIM character limits (SIM UCS-2 Persian max 14, ASCII max 20, Device max 30)
+        is_unicode = any(ord(c) > 127 for c in name)
+        if str(location) == "0":
+            max_len = 14 if is_unicode else 20
+        else:
+            max_len = 30
+        clean_name = name.strip()[:max_len]
+
         url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
         payload = {
             "pb_action": "pbm_contact_add",
             "location": str(location),
-            "name": uni_encode(name),
+            "name": uni_encode(clean_name),
             "mobile": number.strip(),
             "group": group
         }
