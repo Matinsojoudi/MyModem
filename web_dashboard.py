@@ -119,18 +119,28 @@ HTML_PAGE = """<!DOCTYPE html>
         .chat-user-title { font-weight: 700; font-size: 15px; }
         .chat-user-sub { font-size: 12px; color: var(--text-muted); }
         .chat-messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-        .chat-bubble { max-width: 75%; padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 1.6; word-break: break-word; position: relative; }
+        .chat-bubble { max-width: 75%; padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 1.6; word-break: break-word; position: relative; white-space: pre-wrap; }
+        .bubble-text { white-space: pre-wrap; word-break: break-word; }
         .bubble-in { align-self: flex-start; background: var(--bubble-in); color: var(--text-main); border: 1px solid var(--border); border-bottom-right-radius: 3px; }
         .bubble-out { align-self: flex-end; background: var(--bubble-out); color: #ffffff; border-bottom-left-radius: 3px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25); }
         .bubble-meta { font-size: 10px; margin-top: 4px; opacity: 0.8; text-align: left; }
         .bubble-in .bubble-meta { text-align: right; color: var(--text-muted); }
         .chat-composer { padding: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
         .composer-input-row { display: flex; gap: 8px; }
-        .composer-input { flex: 1; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-main); font-size: 13px; outline: none; resize: none; min-height: 44px; max-height: 120px; }
+        .composer-input { flex: 1; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-main); font-size: 13px; outline: none; resize: none; min-height: 44px; max-height: 140px; line-height: 1.5; white-space: pre-wrap; }
         .composer-input:focus { border-color: var(--accent); }
         .btn-send { background: var(--accent); color: #0b0f19; font-weight: 700; border: none; border-radius: 10px; padding: 0 20px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px; }
         .btn-send:hover { opacity: 0.9; }
         .char-meter { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+        /* Speed Stat Card */
+        .speed-meters { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+        .speed-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 8px; font-size: 12px; font-weight: 700; }
+        .speed-pill.speed-down { background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.25); }
+        .speed-pill.speed-up { background: rgba(168, 85, 247, 0.12); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.25); }
+        body.light-theme .speed-pill.speed-down { background: #e0f2fe; color: #0284c7; border-color: #bae6fd; }
+        body.light-theme .speed-pill.speed-up { background: #f3e8ff; color: #7e22ce; border-color: #e9d5ff; }
+        .speed-dir { font-size: 13px; font-weight: 800; }
+        .speed-icon-wrap { color: var(--accent); opacity: 0.9; }
         /* Bulk SMS Campaign */
         .bulk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
         @media (max-width: 800px) { .bulk-grid { grid-template-columns: 1fr; } }
@@ -206,10 +216,23 @@ HTML_PAGE = """<!DOCTYPE html>
             </div>
             <div class="stat-card">
                 <div>
-                    <div class="stat-label">سرعت دانلود / آپلود</div>
-                    <div class="stat-val" id="stat-speed" style="font-size:15px;">۰ KB/s</div>
+                    <div class="stat-label">سرعت زنده دانلود / آپلود</div>
+                    <div class="speed-meters">
+                        <div class="speed-pill speed-down" title="سرعت دانلود لحظه‌ای">
+                            <span class="speed-dir">↓</span>
+                            <span id="stat-speed-down" class="speed-val">۰ KB/s</span>
+                        </div>
+                        <div class="speed-pill speed-up" title="سرعت آپلود لحظه‌ای">
+                            <span class="speed-dir">↑</span>
+                            <span id="stat-speed-up" class="speed-val">۰ KB/s</span>
+                        </div>
+                    </div>
                 </div>
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--warning);"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <div class="speed-icon-wrap" title="ترافیک لحظه‌ای شبکه">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M7 10v12M7 22l-4-4M7 22l4-4M17 14V2M17 2l-4 4M17 2l4 4"/>
+                    </svg>
+                </div>
             </div>
             <div class="stat-card">
                 <div>
@@ -308,7 +331,7 @@ HTML_PAGE = """<!DOCTYPE html>
                                 <span id="chat-status-msg" style="color:var(--text-muted);"></span>
                             </div>
                             <div class="composer-input-row">
-                                <textarea id="chat-composer-input" class="composer-input" placeholder="متن پیامک خود را بنویسید... (ارسال با دکمه یا Enter)" rows="1" oninput="updateChatMetrics()" onkeydown="handleChatKeyDown(event)"></textarea>
+                                <textarea id="chat-composer-input" class="composer-input" placeholder="متن پیامک خود را بنویسید... (ارسال با Enter، خط بعد با Shift+Enter)" rows="1" oninput="updateChatMetrics(); autoExpandTextarea(this);" onkeydown="handleChatKeyDown(event)"></textarea>
                                 <button class="btn-send" id="btn-chat-send" onclick="sendChatMessage()">
                                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                                     ارسال
@@ -583,6 +606,37 @@ HTML_PAGE = """<!DOCTYPE html>
             if (tabId === 'contacts') loadContacts();
         }
 
+        // Formatting & Security Utilities
+        function formatNetworkSpeed(bytes) {
+            const b = parseFloat(bytes) || 0;
+            if (b < 1024) {
+                return Math.round(b) + ' B/s';
+            } else if (b < 1024 * 1024) {
+                const kb = b / 1024;
+                return (kb < 10 ? kb.toFixed(1) : Math.round(kb)) + ' KB/s';
+            } else {
+                const mb = b / (1024 * 1024);
+                return mb.toFixed(2) + ' MB/s';
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function autoExpandTextarea(el) {
+            el.style.height = 'auto';
+            el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+        }
+
+        let lastUnreadSmsCount = null;
+
         // Status Telemetry
         async function refreshStatus() {
             try {
@@ -592,9 +646,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 document.getElementById('stat-battery').innerText = (data.battery_percent || '0') + '%';
                 document.getElementById('stat-wifi').innerText = (data.wifi_clients_num || '0') + ' کلاینت';
                 
-                const rx = Math.round((parseInt(data.rx_speed) || 0) / 1024);
-                const tx = Math.round((parseInt(data.tx_speed) || 0) / 1024);
-                document.getElementById('stat-speed').innerText = rx + ' KB/s ↓  ' + tx + ' KB/s ↑';
+                const downEl = document.getElementById('stat-speed-down');
+                const upEl = document.getElementById('stat-speed-up');
+                if (downEl) downEl.innerText = formatNetworkSpeed(data.rx_speed);
+                if (upEl) upEl.innerText = formatNetworkSpeed(data.tx_speed);
 
                 const sq = parseInt(data.signal_quality) || 0;
                 const labels = { 0: 'بدون آنتن', 1: 'بسیار ضعیف', 2: 'ضعیف', 3: 'متوسط', 4: 'خوب', 5: 'عالی' };
@@ -610,6 +665,13 @@ HTML_PAGE = """<!DOCTYPE html>
                         else bar.classList.add('active');
                     }
                 }
+
+                // Detect new incoming SMS and auto-refresh conversation list
+                const currentUnread = parseInt(data.unread_long || data.new_sms_num || 0);
+                if (lastUnreadSmsCount !== null && currentUnread !== lastUnreadSmsCount) {
+                    loadConversations();
+                }
+                lastUnreadSmsCount = currentUnread;
             } catch (e) {
                 console.error('Status fetch error:', e);
             }
@@ -624,7 +686,21 @@ HTML_PAGE = """<!DOCTYPE html>
                 renderConversationList(allConversations);
                 if (activePeer) {
                     const found = allConversations.find(c => c.peer_number === activePeer);
-                    if (found) renderActiveChat(found);
+                    if (found) {
+                        // If active conversation has unread incoming messages, mark them read
+                        const unreadMsgs = (found.messages || []).filter(m => m.is_unread && m.direction === 'in');
+                        if (unreadMsgs.length > 0) {
+                            const unreadIds = unreadMsgs.map(m => m.id).filter(Boolean);
+                            found.unread_count = 0;
+                            found.messages.forEach(m => { m.is_unread = false; });
+                            fetch('/api/mark_conversation_read', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ ids: unreadIds })
+                            }).catch(console.error);
+                        }
+                        renderActiveChat(found);
+                    }
                 }
             } catch (e) {
                 console.error(e);
@@ -643,16 +719,17 @@ HTML_PAGE = """<!DOCTYPE html>
                 const initials = (c.peer_name ? c.peer_name.slice(0, 2) : c.peer_number.slice(-3)).toUpperCase();
                 const prefix = c.last_direction === 'out' ? '<span style="color:var(--accent);">شما: </span>' : '';
                 const unreadBadge = c.unread_count > 0 ? `<span class="badge-unread">${c.unread_count}</span>` : '';
+                const cleanSnippet = escapeHtml((c.last_message || '').split('\\n').join(' ').split('\\r').join(''));
                 html += `
                     <div class="conv-card ${isActive ? 'active' : ''}" onclick="selectConversation('${c.peer_number}')">
                         <div class="avatar">${initials}</div>
                         <div class="conv-info">
                             <div class="conv-top">
-                                <span class="conv-name">${c.display_name}</span>
+                                <span class="conv-name">${escapeHtml(c.display_name)}</span>
                                 <span class="conv-time">${c.last_time || ''}</span>
                             </div>
                             <div class="conv-bottom">
-                                <span class="conv-snippet">${prefix}${c.last_message || ''}</span>
+                                <span class="conv-snippet">${prefix}${cleanSnippet}</span>
                                 ${unreadBadge}
                             </div>
                         </div>
@@ -678,9 +755,21 @@ HTML_PAGE = """<!DOCTYPE html>
 
         function selectConversation(peerNumber) {
             activePeer = peerNumber;
-            renderConversationList(allConversations);
             const conv = allConversations.find(c => c.peer_number === peerNumber);
             if (conv) {
+                // Auto mark as read immediately when user views the chat
+                const unreadMsgs = (conv.messages || []).filter(m => m.is_unread && m.direction === 'in');
+                if (unreadMsgs.length > 0) {
+                    const unreadIds = unreadMsgs.map(m => m.id).filter(Boolean);
+                    conv.unread_count = 0;
+                    conv.messages.forEach(m => { m.is_unread = false; });
+                    fetch('/api/mark_conversation_read', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ ids: unreadIds })
+                    }).catch(console.error);
+                }
+                renderConversationList(allConversations);
                 renderActiveChat(conv);
             }
         }
@@ -710,7 +799,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 msgsHtml += `
                     <div class="chat-bubble ${bubbleClass}">
                         ${missedAlert}
-                        <div>${m.text}</div>
+                        <div class="bubble-text">${escapeHtml(m.text)}</div>
                         <div class="bubble-meta">${timeStr}</div>
                     </div>
                 `;
@@ -735,8 +824,8 @@ HTML_PAGE = """<!DOCTYPE html>
         async function sendChatMessage() {
             if (!activePeer) return;
             const input = document.getElementById('chat-composer-input');
-            const text = input.value.trim();
-            if (!text) return;
+            const text = input.value;
+            if (!text.trim()) return;
 
             const btn = document.getElementById('btn-chat-send');
             const statusMsg = document.getElementById('chat-status-msg');
@@ -752,6 +841,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 const data = await res.json();
                 if (data.success) {
                     input.value = '';
+                    input.style.height = 'auto';
                     updateChatMetrics();
                     statusMsg.innerText = 'ارسال شد';
                     setTimeout(() => { statusMsg.innerText = ''; }, 3000);
@@ -1233,7 +1323,8 @@ HTML_PAGE = """<!DOCTYPE html>
         refreshStatus();
         loadConversations();
         loadContacts();
-        setInterval(refreshStatus, 15000);
+        setInterval(refreshStatus, 2500);
+        setInterval(loadConversations, 10000);
     </script>
 </body>
 </html>
@@ -1323,6 +1414,15 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             msg_id = payload.get("id", "")
             success = client.mark_sms_as_read(msg_id)
             self.send_json({"success": success})
+            return
+
+        elif path == "/api/mark_conversation_read":
+            ids = payload.get("ids", [])
+            marked = 0
+            for mid in ids:
+                if client.mark_sms_as_read(mid):
+                    marked += 1
+            self.send_json({"success": True, "marked_count": marked})
             return
 
         elif path == "/api/mark_all_read":

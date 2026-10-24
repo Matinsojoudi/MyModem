@@ -80,7 +80,7 @@ def parse_modem_time_to_shamsi(raw_time: str) -> str:
 
 
 def uni_decode(hex_str: str) -> str:
-    """Decodes UCS2 / UTF-16BE hex string from modem into Python string."""
+    """Decodes UCS2 / UTF-16BE hex string from modem into Python string with newline normalization."""
     if not hex_str:
         return ""
     try:
@@ -88,16 +88,18 @@ def uni_decode(hex_str: str) -> str:
         if len(clean_hex) % 2 != 0:
             clean_hex = clean_hex[:-1]
         raw_bytes = bytes.fromhex(clean_hex)
-        return raw_bytes.decode("utf-16-be", errors="replace")
+        decoded = raw_bytes.decode("utf-16-be", errors="replace")
+        return decoded.replace("\r\n", "\n").replace("\r", "\n")
     except Exception:
         return hex_str
 
 
 def uni_encode(text: str) -> str:
-    """Encodes Python string into UTF-16BE uppercase hex string for modem."""
+    """Encodes Python string into UTF-16BE uppercase hex string for modem with preserved multi-lines."""
     if not text:
         return ""
-    return text.encode("utf-16-be").hex().upper()
+    clean = text.replace("\r\n", "\n").replace("\r", "\n")
+    return clean.encode("utf-16-be").hex().upper()
 
 
 def get_sms_time_str() -> str:
