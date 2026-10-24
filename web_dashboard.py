@@ -226,10 +226,11 @@ HTML_PAGE = """<!DOCTYPE html>
         .chat-messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
         .chat-bubble { max-width: 75%; padding: 8px 12px; border-radius: 14px; font-size: 13px; line-height: 1.5; word-break: break-word; position: relative; }
         .bubble-text { white-space: pre-wrap; word-break: break-word; }
-        .bubble-in { align-self: flex-start; background: var(--bubble-in); color: var(--text-main); border: 1px solid var(--border); border-bottom-right-radius: 3px; }
-        .bubble-out { align-self: flex-end; background: var(--bubble-out); color: #ffffff; border-bottom-left-radius: 3px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25); }
+        .bubble-out { align-self: flex-start; background: var(--bubble-out); color: #ffffff; border-bottom-right-radius: 3px; box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25); }
+        .bubble-in { align-self: flex-end; background: var(--bubble-in); color: var(--text-main); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
         .bubble-meta { font-size: 10px; margin-top: 4px; opacity: 0.8; text-align: left; }
-        .bubble-in .bubble-meta { text-align: right; color: var(--text-muted); }
+        .bubble-out .bubble-meta { text-align: left; color: rgba(255, 255, 255, 0.85); }
+        .bubble-in .bubble-meta { text-align: left; color: var(--text-muted); }
         .chat-composer { padding: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
         .composer-input-row { display: flex; gap: 8px; }
         .composer-input { flex: 1; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-main); font-size: 13px; outline: none; resize: none; min-height: 44px; max-height: 140px; line-height: 1.5; white-space: pre-wrap; }
