@@ -105,6 +105,21 @@ def get_sms_time_str() -> str:
     return now.strftime("%y,%m,%d,%H,%M,%S,+3.5")
 
 
+def normalize_phone(phone: str) -> str:
+    """Normalizes Iranian phone numbers (e.g. +98912..., 0098912..., 98912..., 912... -> 0912...)."""
+    if not phone:
+        return ""
+    import re
+    clean = re.sub(r'[\s\-\(\)\.\+]', '', str(phone)).lstrip(';')
+    if clean.startswith('98') and len(clean) >= 12:
+        clean = '0' + clean[2:]
+    elif clean.startswith('0098'):
+        clean = '0' + clean[4:]
+    elif len(clean) == 10 and clean.startswith('9'):
+        clean = '0' + clean
+    return clean
+
+
 class ModemClient:
     def __init__(self, ip: str = MODEM_IP, timeout: float = 3.5):
         self.ip = ip
@@ -430,6 +445,183 @@ class ModemClient:
                 
         return "زمان انتظار برای دریافت پاسخ USSD از سمت شبکه به پایان رسید."
 
+    def get_phonebook(self) -> List[Dict[str, Any]]:
+        """Fetches all contacts from modem phonebook (SIM + Device)."""
+        url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
+        payload = {
+            "pb_action": "pb_get_all",
+            "location": "2",
+            "page_num": "1",
+            "data_per_page": "100"
+        }
+        contacts = []
+        try:
+            r = requests.post(url, json=payload, timeout=self.timeout)
+            if r.status_code == 200:
+                entries = r.json().get("pb_entries", [])
+                for e in entries:
+                    raw_name = e.get("pbm_name", "")
+                    name = uni_decode(raw_name).strip() if raw_name else "بی‌نام"
+                    number = e.get("pbm_number", "").strip()
+                    loc = e.get("pbm_location", "0")
+                    storage = "سیم‌کارت" if loc == "0" else "دستگاه"
+                    group = e.get("pbm_group", "common")
+                    group_fa = {
+                        "common": "عمومی",
+                        "family": "خانواده",
+                        "friend": "دوستان",
+                        "colleague": "همکاران"
+                    }.get(group, group)
+                    
+                    contacts.append({
+                        "id": e.get("pbm_id"),
+                        "name": name,
+                        "number": number,
+                        "normalized_number": normalize_phone(number),
+                        "group": group_fa,
+                        "storage": storage,
+                        "location": loc
+                    })
+        except Exception as e:
+            print(f"[ModemClient] get_phonebook error: {e}")
+        return contacts
+
+    def add_contact(self, name: str, number: str, group: str = "common", location: str = "0") -> bool:
+        """Adds a contact to modem phonebook (location 0=SIM, 1=Device)."""
+        url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
+        payload = {
+            "pb_action": "pbm_contact_add",
+            "location": str(location),
+            "name": uni_encode(name),
+            "mobile": number.strip(),
+            "group": group
+        }
+        try:
+            r = requests.post(url, json=payload, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                return str(data.get("pb_result", "")) == "0"
+        except Exception as e:
+            print(f"[ModemClient] add_contact error: {e}")
+        return False
+
+    def delete_contact(self, contact_id: str) -> bool:
+        """Deletes a contact by pbm_id from modem phonebook."""
+        url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
+        del_id = contact_id if contact_id.endswith(",") else f"{contact_id},"
+        payload = {
+            "pb_action": "pbm_contact_delete",
+            "location": "2",
+            "delete_option": "delete_num",
+            "delete_pb_id": del_id
+        }
+        try:
+            r = requests.post(url, json=payload, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                return str(data.get("pb_result", "")) == "0"
+        except Exception as e:
+            print(f"[ModemClient] delete_contact error: {e}")
+        return False
+
+    def get_sent_sms_list(self, page: int = 1, data_per_page: int = 50) -> List[Dict[str, Any]]:
+        """Fetches sent SMS messages stored in modem memory."""
+        url = f"{self.base_url}?method=post&module=duster&file=json_message_set{int(time.time()*1000)}"
+        payload = {
+            "message_flag": "GET_SENT_SMS_LOCAL",
+            "page_number": page,
+            "data_per_page": str(data_per_page)
+        }
+        sent_messages = []
+        try:
+            r = requests.post(url, json=payload, timeout=self.timeout)
+            if r.status_code == 200:
+                for m in r.json().get("message_list", []):
+                    to_num = uni_decode(m.get("from", "")).lstrip(";")
+                    text = uni_decode(m.get("subject", ""))
+                    raw_time = m.get("received", "")
+                    sent_messages.append({
+                        "id": m.get("index"),
+                        "sender": to_num,
+                        "text": text,
+                        "time": parse_modem_time_to_shamsi(raw_time),
+                        "raw_time": raw_time,
+                        "direction": "out",
+                        "is_unread": False,
+                        "is_missed_call": False
+                    })
+        except Exception as e:
+            print(f"[ModemClient] get_sent_sms_list error: {e}")
+        return sent_messages
+
+    def get_conversations(self) -> Dict[str, Any]:
+        """
+        Combines incoming and outgoing SMS, matches with Phonebook contacts,
+        and groups them into threaded conversations like a modern smartphone.
+        """
+        # 1. Contacts map
+        contacts = self.get_phonebook()
+        contacts_map = {}
+        for c in contacts:
+            norm = c.get("normalized_number")
+            if norm and c.get("name"):
+                contacts_map[norm] = c.get("name")
+
+        # 2. Incoming messages
+        inbox_data = self.get_sms_list(page=1, data_per_page=50)
+        inbox_msgs = inbox_data.get("messages", [])
+        for m in inbox_msgs:
+            m["direction"] = "in"
+
+        # 3. Sent messages
+        sent_msgs = self.get_sent_sms_list(page=1, data_per_page=50)
+
+        # 4. Group by normalized peer
+        threads = {}
+        for m in inbox_msgs:
+            peer = normalize_phone(m.get("sender", ""))
+            if not peer:
+                peer = m.get("sender", "نامشخص")
+            threads.setdefault(peer, []).append(m)
+
+        for s in sent_msgs:
+            peer = normalize_phone(s.get("sender", ""))
+            if not peer:
+                peer = s.get("sender", "نامشخص")
+            threads.setdefault(peer, []).append(s)
+
+        conversations = []
+        total_unread = 0
+        for peer, msgs in threads.items():
+            # Sort messages chronologically (oldest to newest for chat view)
+            msgs.sort(key=lambda x: x.get("raw_time", ""))
+            unread_c = sum(1 for x in msgs if x.get("is_unread"))
+            total_unread += unread_c
+            last_msg = msgs[-1] if msgs else {}
+            contact_name = contacts_map.get(peer, "")
+            
+            conversations.append({
+                "peer_number": peer,
+                "peer_name": contact_name,
+                "display_name": contact_name if contact_name else peer,
+                "last_message": last_msg.get("text", ""),
+                "last_time": last_msg.get("time", ""),
+                "raw_time": last_msg.get("raw_time", ""),
+                "last_direction": last_msg.get("direction", "in"),
+                "unread_count": unread_c,
+                "messages": msgs
+            })
+
+        # Sort conversations by newest activity first
+        conversations.sort(key=lambda x: x.get("raw_time", ""), reverse=True)
+
+        return {
+            "conversations": conversations,
+            "total_conversations": len(conversations),
+            "total_unread": total_unread,
+            "contacts_count": len(contacts)
+        }
+
     def reboot(self) -> bool:
         """Reboots modem."""
         url = f"{self.base_url}?method=get&module=duster&file=json_device_restart{int(time.time()*1000)}"
@@ -442,6 +634,7 @@ class ModemClient:
 
 if __name__ == "__main__":
     client = ModemClient()
-    print("Testing USSD...")
-    res = client.send_ussd("*140*11#")
-    print(res)
+    print("Testing get_conversations...")
+    convs = client.get_conversations()
+    print(f"Loaded {convs['total_conversations']} conversations.")
+
