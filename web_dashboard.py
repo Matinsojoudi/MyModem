@@ -1110,8 +1110,11 @@ HTML_PAGE = """<!DOCTYPE html>
             }
         }
 
+        // Track active chat state to preserve scroll during background polling
+        let lastRenderedPeer = null;
+
         // ================= CONVERSATIONS & CHAT =================
-        async function loadConversations() {
+        async function loadConversations(forceScroll = false) {
             try {
                 const res = await fetch('/api/conversations');
                 const data = await res.json();
@@ -1132,7 +1135,7 @@ HTML_PAGE = """<!DOCTYPE html>
                                 body: JSON.stringify({ ids: unreadIds })
                             }).catch(console.error);
                         }
-                        renderActiveChat(found);
+                        renderActiveChat(found, forceScroll);
                     }
                 }
             } catch (e) {
@@ -1203,11 +1206,11 @@ HTML_PAGE = """<!DOCTYPE html>
                     }).catch(console.error);
                 }
                 renderConversationList(allConversations);
-                renderActiveChat(conv);
+                renderActiveChat(conv, true);
             }
         }
 
-        function renderActiveChat(conv) {
+        function renderActiveChat(conv, forceScrollToBottom = false) {
             document.getElementById('chat-empty-state').style.display = 'none';
             const box = document.getElementById('chat-active-box');
             box.style.display = 'flex';
@@ -1223,6 +1226,13 @@ HTML_PAGE = """<!DOCTYPE html>
             }
 
             const messagesScroll = document.getElementById('chat-messages-scroll');
+            
+            // Check if user is currently near bottom (within 80px) and record previous scroll position
+            const isNearBottom = (messagesScroll.scrollHeight - messagesScroll.scrollTop - messagesScroll.clientHeight) <= 80;
+            const previousScrollTop = messagesScroll.scrollTop;
+            const isSwitchingPeer = (lastRenderedPeer !== conv.peer_number);
+            lastRenderedPeer = conv.peer_number;
+
             let msgsHtml = '';
             (conv.messages || []).forEach(m => {
                 const isOut = m.direction === 'out';
@@ -1232,9 +1242,26 @@ HTML_PAGE = """<!DOCTYPE html>
                 const cleanText = escapeHtml((m.text || '').trim());
                 msgsHtml += `<div class="chat-bubble ${bubbleClass}">${missedAlert}<div class="bubble-text">${cleanText}</div><div class="bubble-meta">${timeStr}</div></div>`;
             });
+
+            // Prevent DOM thrashing if the messages haven't changed
+            if (messagesScroll.innerHTML === msgsHtml && !isSwitchingPeer && !forceScrollToBottom) {
+                return;
+            }
+
             messagesScroll.innerHTML = msgsHtml;
-            messagesScroll.scrollTop = messagesScroll.scrollHeight;
-            document.getElementById('chat-composer-input').focus();
+
+            // Smart scroll: only scroll to bottom if explicitly requested, switched conversation, or user was already at bottom
+            if (forceScrollToBottom || isSwitchingPeer || isNearBottom) {
+                messagesScroll.scrollTop = messagesScroll.scrollHeight;
+            } else {
+                // Keep the exact scroll position user was reading
+                messagesScroll.scrollTop = previousScrollTop;
+            }
+
+            // Only focus input when opening conversation or explicitly sending, not during periodic refresh
+            if (forceScrollToBottom || isSwitchingPeer) {
+                document.getElementById('chat-composer-input').focus();
+            }
         }
 
         function copyActiveNumber() {
@@ -1273,7 +1300,7 @@ HTML_PAGE = """<!DOCTYPE html>
                     updateChatMetrics();
                     statusMsg.innerText = 'ارسال شد';
                     setTimeout(() => { statusMsg.innerText = ''; }, 3000);
-                    await loadConversations();
+                    await loadConversations(true);
                 } else {
                     alert('خطا در ارسال پیامک از طریق مودم.');
                     statusMsg.innerText = 'ارسال ناموفق';
