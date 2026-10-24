@@ -23,6 +23,8 @@ import socket
 import datetime
 from modem_client import ModemClient
 from auth_manager import auth_manager
+from lan_chat_manager import lan_chat_manager, CHAT_UPLOADS_DIR, get_safe_chat_file_path
+from room_page import build_room_page
 
 PORT = 8080
 client = ModemClient()
@@ -194,6 +196,22 @@ LOGIN_PAGE = """<!DOCTYPE html>
             }
         }
     </script>
+
+    <!-- Modal: Create LAN Room -->
+    <div id="modal-create-room" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;">
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:18px;padding:28px;width:380px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+            <h3 style="font-size:16px;font-weight:800;margin-bottom:18px;">ساخت چت‌روم جدید</h3>
+            <div style="margin-bottom:14px;">
+                <label style="font-size:12.5px;color:var(--text-muted);display:block;margin-bottom:6px;">نام اتاق</label>
+                <input id="room-name-input" type="text" placeholder="مثال: تیم فنی" onkeydown="if(event.key==='Enter')createRoom();"
+                    style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--input-bg);color:var(--text-main);outline:none;font-size:14px;box-sizing:border-box;">
+            </div>
+            <div style="display:flex;gap:10px;margin-top:20px;">
+                <button onclick="closeCreateRoomModal()" style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text-muted);cursor:pointer;font-size:13px;">انصراف</button>
+                <button id="btn-create-room-submit" onclick="createRoom()" style="flex:2;padding:10px;border-radius:10px;border:none;background:linear-gradient(135deg,#a855f7,#6366f1);color:white;cursor:pointer;font-size:13px;font-weight:700;">ساخت اتاق</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 """
@@ -774,6 +792,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 انتقال فایل (LAN)
             </button>
+            <button class="tab-btn" id="tab-btn-rooms" onclick="switchTab('rooms')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                چت‌روم شبکه
+            </button>
         </div>
         <!-- Tab 1: Chat & Conversations -->
         <div id="tab-chat" class="tab-content active">
@@ -1302,6 +1324,34 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- Tab 8: LAN Chat Rooms -->
+    <div id="tab-rooms" class="tab-content">
+        <!-- Rooms header banner -->
+        <div style="background:linear-gradient(135deg, rgba(168,85,247,0.15), rgba(59,130,246,0.1)); border:1px solid rgba(168,85,247,0.25); border-radius:16px; padding:22px; margin-bottom:24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+            <div>
+                <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; margin-bottom:10px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    شبکه محلی LAN &bull; بدون مصرف اینترنت
+                </div>
+                <h3 style="font-size:18px; font-weight:800; margin-bottom:6px;">چت‌روم‌های شبکه داخلی</h3>
+                <p style="font-size:13px; color:var(--text-muted); line-height:1.7; margin:0;">
+                    یک اتاق گفتگوی اختصاصی بسازید و لینک آن را با دستگاه‌های موجود در شبکه وای‌فای به اشتراک بگذارید.<br>
+                    بدون نیاز به ورود به سامانه ادمین، هر کسی در شبکه می‌تواند با انتخاب نام وارد چت شود، تماس صوتی یا تصویری برقرار کند و فایل ارسال کند.
+                </p>
+            </div>
+            <button class="btn-sm btn-primary" style="padding:10px 18px; white-space:nowrap;" onclick="openCreateRoomModal()">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                ساخت اتاق جدید
+            </button>
+        </div>
+
+        <!-- Rooms grid -->
+        <div id="rooms-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px;">
+            <!-- Dynamically rendered -->
+        </div>
+    </div>
+    </div>
+
     <!-- Modal: New Chat -->
     <div class="modal-overlay" id="modal-new-chat">
         <div class="modal-card">
@@ -1482,6 +1532,7 @@ HTML_PAGE = """<!DOCTYPE html>
             if (tabId === 'devices') loadDevices();
             if (tabId === 'parental') loadParentalStatus();
             if (tabId === 'files') loadFiles();
+            if (tabId === 'rooms') loadRooms();
         }
 
         // Formatting & Security Utilities
@@ -3153,7 +3204,109 @@ HTML_PAGE = """<!DOCTYPE html>
             if (modal) modal.style.display = 'none';
         }
 
-        // Init
+        // ── LAN Chat Rooms ────────────────────────────────────────────
+        async function loadRooms() {
+            const grid = document.getElementById('rooms-grid');
+            if (!grid) return;
+            grid.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:20px;">در حال بارگذاری...</div>';
+            try {
+                const res = await fetch('/api/lan/rooms');
+                if (!res.ok) throw new Error('fail');
+                const data = await res.json();
+                const rooms = data.rooms || [];
+                if (rooms.length === 0) {
+                    grid.innerHTML = `<div style="grid-column:1/-1;padding:50px 20px;text-align:center;background:var(--bg-card);border-radius:14px;border:1px dashed var(--border);">
+                        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-muted);margin-bottom:12px;"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        <div style="font-weight:700;font-size:14px;margin-bottom:6px;">هنوز اتاقی ساخته نشده</div>
+                        <div style="color:var(--text-muted);font-size:12.5px;">با دکمه «ساخت اتاق جدید» اولین چت‌روم شبکه را ایجاد کنید.</div>
+                    </div>`;
+                    return;
+                }
+                grid.innerHTML = rooms.map(r => {
+                    const link = escapeHtml(r.url || '');
+                    const name = escapeHtml(r.name || r.room_id);
+                    const pid = escapeHtml(r.room_id);
+                    const online = r.online_count || 0;
+                    return `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px;">
+                        <div style="display:flex;align-items:center;gap:10px;">
+                            <div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#a855f7,#6366f1);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                            </div>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
+                                <div style="font-size:11.5px;color:var(--text-muted);">${online} نفر آنلاین</div>
+                            </div>
+                        </div>
+                        <div style="background:var(--input-bg);border:1px solid var(--border);border-radius:9px;padding:8px 12px;font-size:11.5px;color:var(--text-muted);word-break:break-all;direction:ltr;">${link}</div>
+                        <div style="display:flex;gap:8px;">
+                            <button onclick="copyRoomLink('${link}')" style="flex:1;padding:8px;background:rgba(168,85,247,0.12);border:1px solid rgba(168,85,247,0.3);color:#c084fc;border-radius:9px;font-size:12px;cursor:pointer;font-weight:700;">
+                                کپی لینک
+                            </button>
+                            <button onclick="window.open('${link}','_blank')" style="flex:1;padding:8px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);color:#818cf8;border-radius:9px;font-size:12px;cursor:pointer;font-weight:700;">
+                                ورود به اتاق
+                            </button>
+                            <button onclick="deleteRoom('${pid}')" style="padding:8px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#f87171;border-radius:9px;font-size:12px;cursor:pointer;">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch(e) {
+                grid.innerHTML = '<div style="color:#f87171;padding:20px;">خطا در بارگذاری اتاق‌ها</div>';
+            }
+        }
+
+        function openCreateRoomModal() {
+            document.getElementById('modal-create-room').style.display = 'flex';
+            const inp = document.getElementById('room-name-input');
+            if (inp) { inp.value = ''; inp.focus(); }
+        }
+
+        function closeCreateRoomModal() {
+            document.getElementById('modal-create-room').style.display = 'none';
+        }
+
+        async function createRoom() {
+            const name = (document.getElementById('room-name-input')?.value || '').trim();
+            if (!name) { showToast('نام اتاق را وارد کنید', 'error'); return; }
+            const btn = document.getElementById('btn-create-room-submit');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('/api/lan/rooms/create', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+                const data = await res.json();
+                if (data.ok) {
+                    closeCreateRoomModal();
+                    showToast('اتاق با موفقیت ساخته شد!', 'success');
+                    loadRooms();
+                } else {
+                    showToast(data.error || 'خطا در ساخت اتاق', 'error');
+                }
+            } catch(e) {
+                showToast('خطا در اتصال به سرور', 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function deleteRoom(roomId) {
+            if (!confirm('اتاق حذف شود؟')) return;
+            try {
+                const res = await fetch('/api/lan/rooms/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({room_id: roomId}) });
+                const data = await res.json();
+                if (data.ok) { showToast('اتاق حذف شد', 'success'); loadRooms(); }
+                else showToast(data.error || 'خطا', 'error');
+            } catch(e) { showToast('خطا در اتصال', 'error'); }
+        }
+
+        function copyRoomLink(link) {
+            navigator.clipboard.writeText(link).then(() => showToast('لینک کپی شد!', 'success')).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = link; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+                showToast('لینک کپی شد!', 'success');
+            });
+        }
+
+        // ── Init ───────────────────────────────────────────────────────
         initTheme();
         setupDropzone();
         refreshStatus();
@@ -3302,8 +3455,60 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
                 except Exception as e:
                     self.send_error(500, f"Error reading script: {e}")
                     return
+        # Serve LAN Chat Rooms and file attachments locally without authentication
+        if path.startswith("/room/"):
+            room_id = path[len("/room/"):].strip("/")
+            room = lan_chat_manager.get_room(room_id)
+            if not room:
+                self.send_error(404, "Room not found")
+                return
+            html = build_room_page(room_id, room.get("title", "اتاق گفتگو"))
+            encoded = html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+
+        if path == "/api/lan/chat/poll":
+            params = urllib.parse.parse_qs(url_parsed.query)
+            room_id = params.get("room_id", [""])[0]
+            client_id = params.get("client_id", [""])[0]
+            try:
+                last_msg_seq = int(params.get("last_msg_seq", ["0"])[0])
+            except Exception:
+                last_msg_seq = 0
+            try:
+                last_sig_seq = int(params.get("last_sig_seq", ["0"])[0])
+            except Exception:
+                last_sig_seq = 0
+            data = lan_chat_manager.poll_events(room_id, client_id, last_msg_seq, last_sig_seq)
+            self.send_json(data)
+            return
+
+        if path.startswith("/api/lan/chat/file/"):
+            filename = os.path.basename(path)
+            file_path = os.path.join(CHAT_UPLOADS_DIR, filename)
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                mime_type, _ = mimetypes.guess_type(file_path)
+                mime_type = mime_type or "application/octet-stream"
+                try:
+                    with open(file_path, "rb") as f:
+                        file_data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime_type)
+                    self.send_header("Content-Length", str(len(file_data)))
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(file_data)
+                    return
+                except Exception as e:
+                    self.send_error(500, f"Error reading file: {e}")
+                    return
             else:
-                self.send_error(404, "Script Not Found")
+                self.send_error(404, "File not found")
                 return
 
         session_id = self.get_session_token()
@@ -3450,6 +3655,13 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             self.send_json({"text": text, "updated_at": updated_at})
             return
 
+        elif path == "/api/lan/rooms":
+            host = self.headers.get("Host", "localhost").split(":")[0]
+            base_url = f"http://{host}:{PORT}"
+            rooms_list = lan_chat_manager.get_rooms_list(base_url)
+            self.send_json({"rooms": rooms_list})
+            return
+
         self.send_error(404, "Not Found")
 
     def do_POST(self):
@@ -3492,6 +3704,54 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": str(e)}, status=500)
             return
 
+        # Streamed file upload for LAN Chat Rooms (unauthenticated, 0 internet usage)
+        if path == "/api/lan/chat/upload":
+            params = urllib.parse.parse_qs(url_parsed.query)
+            room_id = params.get("room_id", [""])[0]
+            client_id = params.get("client_id", [""])[0]
+            if not room_id or not client_id:
+                self.send_json({"ok": False, "error": "missing params"}, 400)
+                return
+            room = lan_chat_manager.get_room(room_id)
+            if not room:
+                self.send_json({"ok": False, "error": "room not found"}, 404)
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            raw_filename = self.headers.get("X-Filename", "")
+            if not raw_filename:
+                raw_filename = "attachment"
+            try:
+                decoded_name = urllib.parse.unquote(raw_filename)
+            except Exception:
+                decoded_name = "attachment"
+
+            dest_path, safe_name = get_safe_chat_file_path(decoded_name)
+            bytes_left = content_length
+            written = 0
+            try:
+                with open(dest_path, "wb") as f:
+                    while bytes_left > 0:
+                        chunk_size = min(bytes_left, 64 * 1024)
+                        chunk = self.rfile.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        written += len(chunk)
+                        bytes_left -= len(chunk)
+
+                file_url = f"/api/lan/chat/file/{safe_name}"
+                file_info = {
+                    "filename": safe_name,
+                    "url": file_url,
+                    "size": written,
+                }
+                msg = lan_chat_manager.add_message(room_id, client_id, f"فایل پیوست: {safe_name}", file_info)
+                self.send_json({"ok": True, "file": file_info, "msg": msg})
+            except Exception as e:
+                self.send_json({"ok": False, "error": str(e)}, status=500)
+            return
+
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length) if content_length > 0 else b"{}"
 
@@ -3511,6 +3771,56 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json_with_cookie({"success": True}, cookie_header)
             else:
                 self.send_json({"success": False, "message": msg}, status=401)
+            return
+
+        # LAN Chat guest actions (unauthenticated)
+        if path == "/api/lan/chat/join":
+            room_id = payload.get("room_id", "")
+            nickname = (payload.get("nickname") or "").strip()
+            client_id = payload.get("client_id", "")
+            if not room_id or not nickname:
+                self.send_json({"ok": False, "error": "missing fields"}, 400)
+                return
+            result = lan_chat_manager.join_room(room_id, nickname, client_id)
+            if result:
+                self.send_json(result)
+            else:
+                self.send_json({"ok": False, "error": "room not found"}, 404)
+            return
+
+        elif path == "/api/lan/chat/leave":
+            room_id = payload.get("room_id", "")
+            client_id = payload.get("client_id", "")
+            lan_chat_manager.leave_room(room_id, client_id)
+            self.send_json({"ok": True})
+            return
+
+        elif path == "/api/lan/chat/message":
+            room_id = payload.get("room_id", "")
+            client_id = payload.get("client_id", "")
+            text = (payload.get("text") or "").strip()
+            file_info = payload.get("file_info")
+            if not room_id or not client_id or (not text and not file_info):
+                self.send_json({"ok": False, "error": "missing fields"}, 400)
+                return
+            msg = lan_chat_manager.add_message(room_id, client_id, text, file_info)
+            if msg:
+                self.send_json({"ok": True, "msg": msg})
+            else:
+                self.send_json({"ok": False, "error": "room not found"}, 404)
+            return
+
+        elif path == "/api/lan/chat/signal":
+            room_id = payload.get("room_id", "")
+            from_id = payload.get("from_id", "")
+            to_id = payload.get("to_id", "")
+            sig_type = payload.get("type", "")
+            data = payload.get("data")
+            if not room_id or not from_id or not to_id or not sig_type:
+                self.send_json({"ok": False, "error": "missing fields"}, 400)
+                return
+            sig = lan_chat_manager.add_signal(room_id, from_id, to_id, sig_type, data)
+            self.send_json({"ok": True, "signal": sig})
             return
 
         # Authenticate all other POST requests
@@ -3652,6 +3962,23 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"success": True, "updated_at": updated_at})
             except Exception as e:
                 self.send_json({"success": False, "error": str(e)}, status=500)
+            return
+
+        elif path == "/api/lan/rooms/create":
+            name = (payload.get("name") or payload.get("title") or "").strip()
+            if not name:
+                self.send_json({"ok": False, "error": "نام اتاق الزامی است"}, 400)
+                return
+            host = self.headers.get("Host", "localhost").split(":")[0]
+            base_url = f"http://{host}:{PORT}"
+            room = lan_chat_manager.create_room(name)
+            self.send_json({"ok": True, "room_id": room["id"], "url": f"{base_url}/room/{room['id']}"})
+            return
+
+        elif path == "/api/lan/rooms/delete":
+            room_id = payload.get("room_id", "")
+            ok = lan_chat_manager.delete_room(room_id)
+            self.send_json({"ok": ok})
             return
 
         self.send_error(404, "Not Found")
