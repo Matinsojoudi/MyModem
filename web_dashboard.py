@@ -16,11 +16,52 @@ import json
 import urllib.parse
 import http.cookies
 import os
+import shutil
+import mimetypes
+import re
+import socket
+import datetime
 from modem_client import ModemClient
 from auth_manager import auth_manager
 
 PORT = 8080
 client = ModemClient()
+
+SHARED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shared_files")
+CLIPBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".shared_clipboard.json")
+os.makedirs(SHARED_DIR, exist_ok=True)
+
+def get_local_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        s.connect(("192.168.1.1", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "192.168.1.199"
+
+def format_file_size(size_bytes):
+    try:
+        b = float(size_bytes)
+        if b < 1024:
+            return f"{int(b)} بایت"
+        elif b < 1024 * 1024:
+            return f"{b / 1024:.1f} کیلوبایت"
+        elif b < 1024 * 1024 * 1024:
+            return f"{b / (1024 * 1024):.1f} مگابایت"
+        else:
+            return f"{b / (1024 * 1024 * 1024):.2f} گیگابایت"
+    except Exception:
+        return "0 بایت"
+
+def get_safe_shared_path(filename):
+    clean_name = os.path.basename(filename).strip()
+    clean_name = re.sub(r'[\\/]', '', clean_name)
+    if not clean_name:
+        clean_name = "unnamed_file"
+    return os.path.join(SHARED_DIR, clean_name), clean_name
 
 LOGIN_PAGE = """<!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -162,6 +203,7 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="/static/js/qrcode.min.js"></script>
     <style>
         @font-face {
             font-family: 'Vazirmatn';
@@ -378,6 +420,244 @@ HTML_PAGE = """<!DOCTYPE html>
         .traffic-val { font-size: 12px; font-weight: 700; color: var(--text-main); }
         .traffic-lbl { font-size: 10px; color: var(--text-muted); }
         .device-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+
+        /* LAN File Transfer & Shared Clipboard Styles */
+        .lan-banner {
+            background: linear-gradient(135deg, rgba(30, 41, 67, 0.75), rgba(15, 23, 42, 0.85));
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 22px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            box-shadow: var(--shadow-card);
+        }
+        .lan-banner-content { flex: 1; min-width: 280px; }
+        .lan-banner-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+        }
+        .lan-banner-title { font-size: 18px; font-weight: 800; color: var(--text-main); margin-bottom: 6px; }
+        .lan-banner-desc { font-size: 13px; color: var(--text-muted); line-height: 1.7; margin: 0; }
+        .lan-banner-actions { display: flex; flex-direction: column; gap: 10px; min-width: 260px; }
+        .lan-url-pill {
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+        .lan-url-text { font-family: monospace; font-weight: 700; color: var(--accent); direction: ltr; }
+        
+        .lan-dropzone {
+            border: 2px dashed rgba(56, 189, 248, 0.35);
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 16px;
+            padding: 32px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            position: relative;
+            margin-bottom: 24px;
+        }
+        .lan-dropzone:hover, .lan-dropzone.drag-active {
+            border-color: var(--accent);
+            background: rgba(56, 189, 248, 0.08);
+            transform: translateY(-2px);
+        }
+        .lan-dropzone-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            background: rgba(56, 189, 248, 0.12);
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 14px auto;
+        }
+        .lan-dropzone-title { font-size: 16px; font-weight: 800; margin-bottom: 6px; color: var(--text-main); }
+        .lan-dropzone-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+
+        .upload-progress-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+            display: none;
+        }
+        .upload-meta-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 8px; }
+        .upload-progress-bar-bg { height: 8px; background: var(--input-bg); border-radius: 4px; overflow: hidden; position: relative; }
+        .upload-progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #0284c7, #38bdf8); transition: width 0.15s ease; border-radius: 4px; }
+        .upload-speed-badge { font-family: monospace; font-size: 12px; font-weight: 700; color: #34d399; }
+
+        .clipboard-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+        .clipboard-textarea {
+            width: 100%;
+            min-height: 90px;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--input-bg);
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 13.5px;
+            line-height: 1.6;
+            outline: none;
+            resize: vertical;
+            transition: border-color 0.2s;
+            margin-top: 12px;
+            margin-bottom: 12px;
+        }
+        .clipboard-textarea:focus { border-color: var(--accent); }
+
+        .files-section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .files-filter-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+        .filter-pill {
+            padding: 6px 14px;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            background: var(--input-bg);
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .filter-pill:hover { border-color: var(--accent); color: var(--text-main); }
+        .filter-pill.active { background: var(--accent); color: #0b0f19; font-weight: 700; border-color: var(--accent); }
+
+        .files-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .file-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 14px;
+            transition: all 0.2s ease;
+        }
+        .file-card:hover { border-color: var(--border-hover); transform: translateY(-2px); box-shadow: var(--shadow-card); }
+        .file-top-row { display: flex; gap: 12px; align-items: flex-start; }
+        .file-type-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .icon-image { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+        .icon-video { background: rgba(236, 72, 153, 0.15); color: #f472b6; }
+        .icon-audio { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+        .icon-doc { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+        .icon-archive { background: rgba(20, 184, 166, 0.15); color: #2dd4bf; }
+        .icon-app { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+        .icon-other { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+        .file-info { flex: 1; min-width: 0; }
+        .file-name-text {
+            font-weight: 700;
+            font-size: 13.5px;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+        .file-meta-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
+        .file-ext-badge {
+            text-transform: uppercase;
+            font-family: monospace;
+            font-weight: 700;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-main);
+            border: 1px solid var(--border);
+        }
+        .file-actions-row {
+            display: flex;
+            gap: 6px;
+            border-top: 1px dashed var(--border);
+            padding-top: 12px;
+            align-items: center;
+        }
+        .btn-file-action {
+            flex: 1;
+            padding: 7px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--input-bg);
+            color: var(--text-main);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .btn-file-action:hover { background: rgba(56, 189, 248, 0.15); border-color: var(--accent); color: var(--accent); }
+        .btn-file-delete {
+            width: 32px;
+            padding: 7px 0;
+            flex: none;
+            border-color: rgba(244, 63, 94, 0.25);
+            color: var(--danger);
+        }
+        .btn-file-delete:hover { background: rgba(244, 63, 94, 0.15); border-color: var(--danger); color: #fb7185; }
+
+        .qr-card-box {
+            background: #ffffff;
+            padding: 16px;
+            border-radius: 12px;
+            display: inline-block;
+            margin: 16px auto;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        }
+        #qr-code-box img, #qr-code-box canvas {
+            display: block;
+            margin: 0 auto;
+        }
     </style>
 </head>
 <body>
@@ -489,6 +769,10 @@ HTML_PAGE = """<!DOCTYPE html>
             <button class="tab-btn" id="tab-btn-control" onclick="switchTab('control')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 کنترل مودم
+            </button>
+            <button class="tab-btn" id="tab-btn-files" onclick="switchTab('files')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                انتقال فایل (LAN)
             </button>
         </div>
         <!-- Tab 1: Chat & Conversations -->
@@ -894,6 +1178,128 @@ HTML_PAGE = """<!DOCTYPE html>
                 </div>
             </div>
         </div>
+
+        <!-- Tab 7: Local File Transfer (LAN Share) -->
+        <div id="tab-files" class="tab-content">
+            <!-- Banner / Header -->
+            <div class="lan-banner">
+                <div class="lan-banner-content">
+                    <div class="lan-banner-tag">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                        شبکه داخلی LAN &bull; صفر ریال هزینه اینترنت
+                    </div>
+                    <div class="lan-banner-title">انتقال و اشتراک فایل در شبکه محلی وای‌فای</div>
+                    <p class="lan-banner-desc">
+                        فایل‌ها مستقیماً از طریق امواج وای‌فای مودم با حداکثر سرعت بین کامپیوتر، گوشی و تبلت تبادل می‌شوند. در این ارتباط حتی ۱ بایت از حجم اینترنت یا بسته سیم‌کارت مصرف نمی‌شود.
+                    </p>
+                </div>
+                <div class="lan-banner-actions">
+                    <div class="lan-url-pill">
+                        <span style="font-size:11.5px; color:var(--text-muted);">آدرس شبکه:</span>
+                        <span class="lan-url-text" id="lan-url-display">http://192.168.1.199:8080</span>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-sm btn-secondary" style="flex:1; justify-content:center; padding:8px;" onclick="copyLanUrl()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            کپی آدرس
+                        </button>
+                        <button class="btn-sm btn-primary" style="flex:1; justify-content:center; padding:8px;" onclick="openQrModal()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                            بارکد اتصال گوشی
+                        </button>
+                    </div>
+                    <div style="font-size:11.5px; color:var(--text-muted); display:flex; justify-content:space-between; margin-top:2px;">
+                        <span>فایل‌ها: <strong id="lan-shared-size" style="color:var(--text-main);">۰ بایت</strong></span>
+                        <span>دیسک آزاد: <strong id="lan-free-disk" style="color:var(--text-main);">--</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Drag & Drop Upload Zone -->
+            <div class="lan-dropzone" id="lan-dropzone" onclick="document.getElementById('lan-file-input').click()">
+                <input type="file" id="lan-file-input" multiple onchange="handleLanFileSelect(this.files)" style="display:none;">
+                <div class="lan-dropzone-icon">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                </div>
+                <div class="lan-dropzone-title">فایل‌ها را بکشید و اینجا رها کنید، یا برای انتخاب کلیک نمایید</div>
+                <div class="lan-dropzone-desc">پشتیبانی از انواع فیلم، موسیقی، عکس، اسناد، بسته‌های نصبی (APK/EXE) و آرشیو بدون محدودیت حجم</div>
+                <button class="btn-sm btn-primary" style="pointer-events:none; padding:8px 20px;">انتخاب فایل از سیستم</button>
+            </div>
+
+            <!-- Live Upload Progress Card -->
+            <div class="upload-progress-box" id="upload-progress-box">
+                <div class="upload-meta-row">
+                    <div>
+                        <strong id="upload-filename" style="color:var(--text-main);">در حال آپلود فایل...</strong>
+                        <span id="upload-stats" style="color:var(--text-muted); font-size:12px; margin-right:8px;"></span>
+                    </div>
+                    <div>
+                        <span class="upload-speed-badge" id="upload-speed">۰ KB/s</span>
+                        <span id="upload-percent" style="font-weight:700; color:var(--accent); margin-right:8px;">۰%</span>
+                    </div>
+                </div>
+                <div class="upload-progress-bar-bg">
+                    <div class="upload-progress-bar-fill" id="upload-progress-fill"></div>
+                </div>
+            </div>
+
+            <!-- Shared Clipboard & Notes Card -->
+            <div class="clipboard-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <h4 style="font-size:15px; font-weight:800; margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                            کلیپ‌بورد و یادداشت مشترک شبکه
+                        </h4>
+                        <p style="font-size:12px; color:var(--text-muted); margin:0;">
+                            متن، پیام یا لینکی که می‌خواهید سریعاً بین گوشی و کامپیوتر تبادل شود را اینجا یادداشت کنید.
+                        </p>
+                    </div>
+                    <span id="clipboard-updated-time" style="font-size:11px; color:var(--text-muted); font-family:monospace; direction:ltr;"></span>
+                </div>
+                <textarea id="shared-clipboard-text" class="clipboard-textarea" placeholder="متن، لینک وب‌سایت یا پیامی که می‌خواهید به سرعت در دستگاه دیگر کپی شود را اینجا بنویسید..."></textarea>
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-sm btn-primary" onclick="saveSharedClipboard()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                            ذخیره و اشتراک روی شبکه
+                        </button>
+                        <button class="btn-sm btn-secondary" onclick="copySharedClipboard()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            کپی متن
+                        </button>
+                    </div>
+                    <button class="btn-sm btn-secondary" style="color:var(--text-muted);" onclick="clearSharedClipboard()">
+                        پاکسازی متن
+                    </button>
+                </div>
+            </div>
+
+            <!-- Shared Files List Section -->
+            <div class="files-section-header">
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <h3 style="font-size:16px; font-weight:800; margin:0;">
+                        فایل‌های به اشتراک گذاشته شده (<span id="shared-files-count">۰</span>)
+                    </h3>
+                    <div class="files-filter-pills">
+                        <button class="filter-pill active" onclick="setFileCategoryFilter('all', this)">همه</button>
+                        <button class="filter-pill" onclick="setFileCategoryFilter('image', this)">تصاویر</button>
+                        <button class="filter-pill" onclick="setFileCategoryFilter('video', this)">ویدیوها</button>
+                        <button class="filter-pill" onclick="setFileCategoryFilter('audio', this)">صوتی</button>
+                        <button class="filter-pill" onclick="setFileCategoryFilter('doc', this)">اسناد</button>
+                        <button class="filter-pill" onclick="setFileCategoryFilter('archive', this)">آرشیو و نرم‌افزار</button>
+                    </div>
+                </div>
+                <div style="min-width:240px;">
+                    <input type="text" id="file-search-input" class="conv-search" placeholder="جستجو در نام فایل‌ها..." oninput="filterFiles()" style="margin:0;">
+                </div>
+            </div>
+
+            <!-- Files Grid -->
+            <div class="files-grid" id="shared-files-grid">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
     </div>
 
     <!-- Modal: New Chat -->
@@ -998,6 +1404,44 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- Modal: QR Code Connect -->
+    <div class="modal-overlay" id="modal-qr-connect">
+        <div class="modal-card" style="text-align:center; max-width:380px;">
+            <h3 style="font-size:16px; font-weight:800; margin-bottom:8px;">اتصال سریع با اسکن بارکد QR</h3>
+            <p style="color:var(--text-muted); font-size:12.5px; margin-bottom:16px;">
+                دوربین گوشی خود را باز کرده و بارکد زیر را اسکن کنید تا مستقیماً به پنل انتقال فایل در شبکه داخلی متصل شوید:
+            </p>
+            <div class="qr-card-box">
+                <div id="qr-code-box"></div>
+            </div>
+            <div style="margin-top:12px; margin-bottom:18px;">
+                <span style="font-size:11.5px; color:var(--text-muted);">آدرس شبکه داخلی:</span>
+                <div style="font-family:monospace; font-weight:700; color:var(--accent); font-size:14px; margin-top:4px;" id="qr-modal-url"></div>
+            </div>
+            <button class="btn-sm btn-secondary" style="width:100%; justify-content:center; padding:10px;" onclick="closeQrModal()">بستن پنجره</button>
+        </div>
+    </div>
+
+    <!-- Modal: File Preview -->
+    <div class="modal-overlay" id="modal-file-preview">
+        <div class="modal-card" style="max-width:760px; width:92%; padding:20px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border); padding-bottom:10px;">
+                <h3 style="font-size:15px; font-weight:800; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:85%;" id="preview-title">پیش‌نمایش فایل</h3>
+                <button class="btn-sm btn-secondary" style="padding:4px 8px;" onclick="closeFilePreviewModal()">✕</button>
+            </div>
+            <div id="preview-content-box" style="min-height:200px; display:flex; align-items:center; justify-content:center; overflow:auto; max-height:70vh;">
+                <!-- Dynamically loaded preview element -->
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px; border-top:1px solid var(--border); padding-top:12px;">
+                <a id="preview-download-btn" href="#" download class="btn-sm btn-primary" style="text-decoration:none; padding:8px 16px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    دانلود فایل
+                </a>
+                <button class="btn-sm btn-secondary" onclick="closeFilePreviewModal()">بستن</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let allConversations = [];
         let activePeer = null;
@@ -1037,6 +1481,7 @@ HTML_PAGE = """<!DOCTYPE html>
             if (tabId === 'contacts') loadContacts();
             if (tabId === 'devices') loadDevices();
             if (tabId === 'parental') loadParentalStatus();
+            if (tabId === 'files') loadFiles();
         }
 
         // Formatting & Security Utilities
@@ -2289,8 +2734,428 @@ HTML_PAGE = """<!DOCTYPE html>
             window.location.reload();
         }
 
+        // LAN File Transfer & Shared Clipboard Logic
+        let allSharedFiles = [];
+        let currentFileCategory = 'all';
+        let currentLanUrl = window.location.origin;
+
+        async function loadFiles() {
+            try {
+                const res = await fetch('/api/files/list');
+                if (!res.ok) return;
+                const data = await res.json();
+                allSharedFiles = data.files || [];
+                
+                if (data.lan_url) {
+                    currentLanUrl = data.lan_url;
+                    const urlDisp = document.getElementById('lan-url-display');
+                    if (urlDisp) urlDisp.innerText = data.lan_url;
+                }
+
+                const sharedSizeEl = document.getElementById('lan-shared-size');
+                if (sharedSizeEl) sharedSizeEl.innerText = data.formatted_shared_used || '۰ بایت';
+
+                const freeDiskEl = document.getElementById('lan-free-disk');
+                if (freeDiskEl) freeDiskEl.innerText = data.formatted_disk_free || '--';
+
+                const countEl = document.getElementById('shared-files-count');
+                if (countEl) countEl.innerText = allSharedFiles.length;
+
+                renderFiles();
+                loadSharedClipboard();
+            } catch (e) {
+                console.error('Error loading shared files:', e);
+            }
+        }
+
+        function setFileCategoryFilter(cat, btn) {
+            currentFileCategory = cat;
+            document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            renderFiles();
+        }
+
+        function filterFiles() {
+            renderFiles();
+        }
+
+        function renderFiles() {
+            const grid = document.getElementById('shared-files-grid');
+            if (!grid) return;
+
+            const query = (document.getElementById('file-search-input')?.value || '').trim().toLowerCase();
+
+            const filtered = allSharedFiles.filter(f => {
+                if (currentFileCategory !== 'all' && f.category !== currentFileCategory) {
+                    return false;
+                }
+                if (query && !f.name.toLowerCase().includes(query)) {
+                    return false;
+                }
+                return true;
+            });
+
+            const countEl = document.getElementById('shared-files-count');
+            if (countEl) countEl.innerText = filtered.length;
+
+            if (filtered.length === 0) {
+                grid.innerHTML = `
+                    <div style="grid-column: 1 / -1; padding: 40px 20px; text-align: center; background: var(--bg-card); border-radius: 14px; border: 1px dashed var(--border);">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--text-muted); margin-bottom:10px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+                        <div style="font-weight:700; color:var(--text-main); font-size:14px; margin-bottom:4px;">هیچ فایلی یافت نشد</div>
+                        <div style="color:var(--text-muted); font-size:12.5px;">فایل‌های خود را به کادر بالا بکشید یا برای جستجو واژه دیگری وارد کنید.</div>
+                    </div>
+                `;
+                return;
+            }
+
+            grid.innerHTML = filtered.map(f => {
+                const ext = escapeHtml(f.ext.toUpperCase());
+                const name = escapeHtml(f.name);
+                const size = escapeHtml(f.formatted_size);
+                const time = escapeHtml(f.formatted_time);
+                const cat = f.category;
+
+                let iconSvg = '';
+                let iconClass = 'icon-other';
+                if (cat === 'image') {
+                    iconClass = 'icon-image';
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+                } else if (cat === 'video') {
+                    iconClass = 'icon-video';
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>';
+                } else if (cat === 'audio') {
+                    iconClass = 'icon-audio';
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+                } else if (cat === 'doc') {
+                    iconClass = 'icon-doc';
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
+                } else if (cat === 'archive') {
+                    iconClass = 'icon-archive';
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+                } else if (cat === 'app') {
+                    iconClass = 'icon-app';
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
+                } else {
+                    iconSvg = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>';
+                }
+
+                const canPreview = ['image', 'video', 'audio'].includes(cat) || ['txt', 'json', 'pdf'].includes(f.ext.toLowerCase());
+                const previewBtn = canPreview ? `
+                    <button class="btn-file-action" onclick="openFilePreview('${encodeURIComponent(f.name)}', '${f.category}', '${escapeHtml(f.name)}')">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        پیش‌نمایش
+                    </button>
+                ` : '';
+
+                return `
+                    <div class="file-card">
+                        <div class="file-top-row">
+                            <div class="file-type-icon ${iconClass}">
+                                ${iconSvg}
+                            </div>
+                            <div class="file-info">
+                                <div class="file-name-text" title="${name}">${name}</div>
+                                <div class="file-meta-row">
+                                    <span class="file-ext-badge">${ext}</span>
+                                    <span>${size}</span>
+                                    <span>&bull;</span>
+                                    <span style="direction:ltr;">${time}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="file-actions-row">
+                            <a href="/api/files/download?name=${encodeURIComponent(f.name)}" download="${name}" class="btn-file-action" style="background:rgba(56, 189, 248, 0.12); color:var(--accent); border-color:rgba(56, 189, 248, 0.25);">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                دانلود
+                            </a>
+                            ${previewBtn}
+                            <button class="btn-file-action" onclick="copyFileDownloadLink('${encodeURIComponent(f.name)}')">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                                لینک
+                            </button>
+                            <button class="btn-file-action btn-file-delete" title="حذف فایل از سرور" onclick="deleteSharedFile('${encodeURIComponent(f.name)}', '${name}')">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function handleLanFileSelect(files) {
+            if (!files || files.length === 0) return;
+            uploadFilesQueue(Array.from(files));
+        }
+
+        function setupDropzone() {
+            const dropzone = document.getElementById('lan-dropzone');
+            if (!dropzone) return;
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.add('drag-active');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.remove('drag-active');
+                }, false);
+            });
+
+            dropzone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files && files.length > 0) {
+                    uploadFilesQueue(Array.from(files));
+                }
+            }, false);
+        }
+
+        async function uploadFilesQueue(filesList) {
+            const progressBox = document.getElementById('upload-progress-box');
+            const filenameEl = document.getElementById('upload-filename');
+            const statsEl = document.getElementById('upload-stats');
+            const speedEl = document.getElementById('upload-speed');
+            const percentEl = document.getElementById('upload-percent');
+            const fillEl = document.getElementById('upload-progress-fill');
+
+            if (progressBox) progressBox.style.display = 'block';
+
+            for (let i = 0; i < filesList.length; i++) {
+                const file = filesList[i];
+                if (filenameEl) filenameEl.innerText = `در حال آپلود (${i + 1}/${filesList.length}): ${file.name}`;
+                if (fillEl) fillEl.style.width = '0%';
+                if (percentEl) percentEl.innerText = '۰%';
+                if (speedEl) speedEl.innerText = '۰ KB/s';
+
+                await new Promise((resolve) => {
+                    const xhr = new XMLHttpRequest();
+                    let lastLoaded = 0;
+                    let lastTime = Date.now();
+
+                    xhr.upload.onprogress = (e) => {
+                        if (e.lengthComputable) {
+                            const percent = Math.round((e.loaded / e.total) * 100);
+                            if (fillEl) fillEl.style.width = percent + '%';
+                            if (percentEl) percentEl.innerText = percent + '%';
+
+                            const now = Date.now();
+                            const diffTime = (now - lastTime) / 1000;
+                            if (diffTime >= 0.3) {
+                                const diffBytes = e.loaded - lastLoaded;
+                                const speed = diffBytes / diffTime;
+                                if (speedEl) speedEl.innerText = formatNetworkSpeed(speed);
+                                lastLoaded = e.loaded;
+                                lastTime = now;
+                            }
+
+                            if (statsEl) {
+                                statsEl.innerText = `(${formatNetworkSpeed(e.loaded).replace('/s','')} از ${formatNetworkSpeed(e.total).replace('/s','')})`;
+                            }
+                        }
+                    };
+
+                    xhr.onload = () => {
+                        resolve();
+                    };
+
+                    xhr.onerror = () => {
+                        alert(`خطا در آپلود فایل ${file.name}`);
+                        resolve();
+                    };
+
+                    xhr.open('POST', '/api/files/upload', true);
+                    xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+                    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+                    xhr.send(file);
+                });
+            }
+
+            if (progressBox) progressBox.style.display = 'none';
+            const input = document.getElementById('lan-file-input');
+            if (input) input.value = '';
+            loadFiles();
+        }
+
+        async function deleteSharedFile(encodedName, rawName) {
+            if (!confirm(`آیا از حذف فایل "${rawName}" اطمینان دارید؟`)) return;
+            try {
+                const res = await fetch('/api/files/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: decodeURIComponent(encodedName) })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    loadFiles();
+                } else {
+                    alert('خطا در حذف فایل: ' + (data.error || 'ناشناخته'));
+                }
+            } catch (e) {
+                alert('خطا در ارتباط با سرور.');
+            }
+        }
+
+        function copyFileDownloadLink(encodedName) {
+            const fullUrl = `${currentLanUrl}/api/files/download?name=${encodedName}`;
+            navigator.clipboard.writeText(fullUrl).then(() => {
+                alert('لینک مستقیم دانلود فایل در حافظه کپی شد.');
+            }).catch(() => {
+                prompt('آدرس فایل را کپی کنید:', fullUrl);
+            });
+        }
+
+        function copyLanUrl() {
+            navigator.clipboard.writeText(currentLanUrl).then(() => {
+                alert('آدرس دسترسی در شبکه وای‌فای کپی شد: ' + currentLanUrl);
+            }).catch(() => {
+                prompt('آدرس دسترسی شبکه:', currentLanUrl);
+            });
+        }
+
+        async function loadSharedClipboard() {
+            try {
+                const res = await fetch('/api/files/clipboard');
+                if (!res.ok) return;
+                const data = await res.json();
+                const textarea = document.getElementById('shared-clipboard-text');
+                const timeEl = document.getElementById('clipboard-updated-time');
+                if (textarea && document.activeElement !== textarea) {
+                    textarea.value = data.text || '';
+                }
+                if (timeEl) {
+                    timeEl.innerText = data.updated_at ? `آخرین تغییر: ${data.updated_at}` : '';
+                }
+            } catch (e) {}
+        }
+
+        async function saveSharedClipboard() {
+            const textarea = document.getElementById('shared-clipboard-text');
+            if (!textarea) return;
+            try {
+                const res = await fetch('/api/files/clipboard', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: textarea.value })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    const timeEl = document.getElementById('clipboard-updated-time');
+                    if (timeEl) timeEl.innerText = `آخرین تغییر: ${data.updated_at}`;
+                    alert('متن با موفقیت روی شبکه ذخیره شد.');
+                }
+            } catch (e) {
+                alert('خطا در ذخیره متن.');
+            }
+        }
+
+        function copySharedClipboard() {
+            const textarea = document.getElementById('shared-clipboard-text');
+            if (!textarea || !textarea.value) {
+                alert('متنی برای کپی وجود ندارد.');
+                return;
+            }
+            navigator.clipboard.writeText(textarea.value).then(() => {
+                alert('متن کلیپ‌بورد در حافظه کپی شد.');
+            });
+        }
+
+        async function clearSharedClipboard() {
+            if (!confirm('آیا می‌خواهید متن یادداشت پاکسازی شود؟')) return;
+            const textarea = document.getElementById('shared-clipboard-text');
+            if (textarea) textarea.value = '';
+            await saveSharedClipboard();
+        }
+
+        function openQrModal() {
+            const modal = document.getElementById('modal-qr-connect');
+            const qrBox = document.getElementById('qr-code-box');
+            const urlEl = document.getElementById('qr-modal-url');
+            if (urlEl) urlEl.innerText = currentLanUrl;
+            if (qrBox) {
+                qrBox.innerHTML = '';
+                try {
+                    if (typeof QRCode !== 'undefined') {
+                        new QRCode(qrBox, {
+                            text: currentLanUrl,
+                            width: 200,
+                            height: 200,
+                            colorDark: '#0b0f19',
+                            colorLight: '#ffffff',
+                            correctLevel: QRCode.CorrectLevel.M
+                        });
+                    } else {
+                        qrBox.innerText = 'کتابخانه بارکد بارگذاری نشد.';
+                    }
+                } catch (e) {
+                    console.error('Error generating QR:', e);
+                    qrBox.innerText = 'خطا در تولید بارکد.';
+                }
+            }
+            if (modal) modal.style.display = 'flex';
+        }
+
+        function closeQrModal() {
+            const modal = document.getElementById('modal-qr-connect');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function openFilePreview(encodedName, category, rawName) {
+            const modal = document.getElementById('modal-file-preview');
+            const titleEl = document.getElementById('preview-title');
+            const box = document.getElementById('preview-content-box');
+            const dlBtn = document.getElementById('preview-download-btn');
+
+            if (titleEl) titleEl.innerText = `پیش‌نمایش: ${rawName}`;
+            if (dlBtn) {
+                dlBtn.href = `/api/files/download?name=${encodedName}`;
+                dlBtn.setAttribute('download', rawName);
+            }
+
+            const previewUrl = `/api/files/preview?name=${encodedName}`;
+
+            if (box) {
+                box.innerHTML = '';
+                if (category === 'image') {
+                    box.innerHTML = `<img src="${previewUrl}" style="max-width:100%; max-height:65vh; border-radius:10px; object-fit:contain;" alt="${rawName}">`;
+                } else if (category === 'video') {
+                    box.innerHTML = `<video controls autoplay style="max-width:100%; max-height:65vh; border-radius:10px;"><source src="${previewUrl}"></video>`;
+                } else if (category === 'audio') {
+                    box.innerHTML = `
+                        <div style="padding:30px 20px; text-align:center; width:100%;">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent); margin-bottom:16px;"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                            <audio controls autoplay style="width:100%; max-width:480px;"><source src="${previewUrl}"></audio>
+                        </div>
+                    `;
+                } else {
+                    box.innerHTML = `<div style="padding:20px; color:var(--text-muted); font-size:13px;">در حال دریافت محتوای متنی...</div>`;
+                    fetch(previewUrl).then(r => r.text()).then(t => {
+                        box.innerHTML = `<pre style="width:100%; max-height:60vh; overflow:auto; background:var(--input-bg); padding:16px; border-radius:10px; font-family:monospace; direction:ltr; text-align:left; font-size:12.5px; line-height:1.6; color:var(--text-main); white-space:pre-wrap;">${escapeHtml(t)}</pre>`;
+                    }).catch(() => {
+                        box.innerHTML = `<div style="padding:20px; color:var(--danger);">امکان نمایش آنلاین این فایل وجود ندارد. لطفاً فایل را دانلود کنید.</div>`;
+                    });
+                }
+            }
+
+            if (modal) modal.style.display = 'flex';
+        }
+
+        function closeFilePreviewModal() {
+            const modal = document.getElementById('modal-file-preview');
+            const box = document.getElementById('preview-content-box');
+            if (box) box.innerHTML = '';
+            if (modal) modal.style.display = 'none';
+        }
+
         // Init
         initTheme();
+        setupDropzone();
         refreshStatus();
         loadConversations();
         loadContacts();
@@ -2356,6 +3221,37 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def stream_file(self, filepath, filename, as_attachment=True):
+        if not os.path.exists(filepath) or not os.path.isfile(filepath):
+            self.send_error(404, "File Not Found")
+            return
+        try:
+            file_size = os.path.getsize(filepath)
+            mime_type, _ = mimetypes.guess_type(filepath)
+            if not mime_type:
+                mime_type = "application/octet-stream"
+
+            self.send_response(200)
+            self.send_header("Content-Type", mime_type)
+            self.send_header("Content-Length", str(file_size))
+            disp_type = "attachment" if as_attachment else "inline"
+            encoded_fn = urllib.parse.quote(filename)
+            self.send_header("Content-Disposition", f"{disp_type}; filename*=UTF-8''{encoded_fn}")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+            with open(filepath, "rb") as f:
+                while True:
+                    chunk = f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception:
+            pass
+
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2386,6 +3282,28 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
                     return
             else:
                 self.send_error(404, "Font Not Found")
+                return
+
+        # Serve static script files locally without authentication
+        if path == "/static/js/qrcode.min.js":
+            js_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "js", "qrcode.min.js")
+            if os.path.exists(js_path) and os.path.isfile(js_path):
+                try:
+                    with open(js_path, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                except Exception as e:
+                    self.send_error(500, f"Error reading script: {e}")
+                    return
+            else:
+                self.send_error(404, "Script Not Found")
                 return
 
         session_id = self.get_session_token()
@@ -2443,11 +3361,136 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             self.send_json(dns_data)
             return
 
+        elif path == "/api/files/list":
+            files_data = []
+            total_shared_bytes = 0
+            try:
+                for entry in os.scandir(SHARED_DIR):
+                    if entry.is_file() and entry.name != ".gitkeep":
+                        st = entry.stat()
+                        size = st.st_size
+                        mtime = st.st_mtime
+                        total_shared_bytes += size
+                        _, ext = os.path.splitext(entry.name)
+                        ext_lower = ext.lower().lstrip(".")
+                        category = "other"
+                        if ext_lower in ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]:
+                            category = "image"
+                        elif ext_lower in ["mp4", "mkv", "mov", "avi", "webm", "3gp"]:
+                            category = "video"
+                        elif ext_lower in ["mp3", "wav", "aac", "ogg", "flac", "m4a"]:
+                            category = "audio"
+                        elif ext_lower in ["pdf", "txt", "docx", "doc", "xlsx", "xls", "pptx", "csv", "json"]:
+                            category = "doc"
+                        elif ext_lower in ["zip", "rar", "7z", "tar", "gz"]:
+                            category = "archive"
+                        elif ext_lower in ["apk", "dmg", "exe", "iso"]:
+                            category = "app"
+
+                        files_data.append({
+                            "name": entry.name,
+                            "size": size,
+                            "formatted_size": format_file_size(size),
+                            "mtime": mtime,
+                            "formatted_time": datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
+                            "category": category,
+                            "ext": ext_lower or "file"
+                        })
+                files_data.sort(key=lambda x: x["mtime"], reverse=True)
+            except Exception:
+                pass
+
+            try:
+                disk = shutil.disk_usage(SHARED_DIR)
+                disk_total = disk.total
+                disk_free = disk.free
+                disk_used = disk.used
+            except Exception:
+                disk_total = 0
+                disk_free = 0
+                disk_used = 0
+
+            lan_ip = get_local_lan_ip()
+            self.send_json({
+                "files": files_data,
+                "count": len(files_data),
+                "total_shared_bytes": total_shared_bytes,
+                "formatted_shared_used": format_file_size(total_shared_bytes),
+                "disk_free": disk_free,
+                "formatted_disk_free": format_file_size(disk_free),
+                "disk_total": disk_total,
+                "lan_ip": lan_ip,
+                "lan_port": PORT,
+                "lan_url": f"http://{lan_ip}:{PORT}"
+            })
+            return
+
+        elif path in ["/api/files/download", "/api/files/preview"]:
+            query = urllib.parse.parse_qs(url_parsed.query)
+            filename = query.get("name", [""])[0]
+            if not filename:
+                self.send_error(400, "Missing filename")
+                return
+            safe_path, safe_name = get_safe_shared_path(filename)
+            as_attachment = (path == "/api/files/download")
+            self.stream_file(safe_path, safe_name, as_attachment=as_attachment)
+            return
+
+        elif path == "/api/files/clipboard":
+            text = ""
+            updated_at = ""
+            if os.path.exists(CLIPBOARD_FILE):
+                try:
+                    with open(CLIPBOARD_FILE, "r", encoding="utf-8") as f:
+                        clip_data = json.load(f)
+                        text = clip_data.get("text", "")
+                        updated_at = clip_data.get("updated_at", "")
+                except Exception:
+                    pass
+            self.send_json({"text": text, "updated_at": updated_at})
+            return
+
         self.send_error(404, "Not Found")
 
     def do_POST(self):
         url_parsed = urllib.parse.urlparse(self.path)
         path = url_parsed.path
+
+        # Streamed file upload handling (avoids loading multi-GB body in RAM)
+        if path == "/api/files/upload":
+            session_id = self.get_session_token()
+            if not auth_manager.is_valid_session(session_id):
+                self.send_json({"error": "Unauthorized"}, status=401)
+                return
+
+            content_length = int(self.headers.get("Content-Length", 0))
+            raw_filename = self.headers.get("X-Filename", "")
+            if not raw_filename:
+                raw_filename = "unnamed_file"
+            try:
+                decoded_name = urllib.parse.unquote(raw_filename)
+            except Exception:
+                decoded_name = "unnamed_file"
+
+            dest_path, safe_name = get_safe_shared_path(decoded_name)
+            bytes_left = content_length
+            written = 0
+
+            try:
+                with open(dest_path, "wb") as f:
+                    while bytes_left > 0:
+                        chunk_size = min(bytes_left, 64 * 1024)
+                        chunk = self.rfile.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        written += len(chunk)
+                        bytes_left -= len(chunk)
+
+                self.send_json({"success": True, "filename": safe_name, "size": written})
+            except Exception as e:
+                self.send_json({"success": False, "error": str(e)}, status=500)
+            return
 
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length) if content_length > 0 else b"{}"
@@ -2583,6 +3626,32 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/reboot":
             success = client.reboot()
             self.send_json({"success": success})
+            return
+
+        elif path == "/api/files/delete":
+            filename = payload.get("name", "")
+            if filename:
+                safe_path, safe_name = get_safe_shared_path(filename)
+                if os.path.exists(safe_path) and os.path.isfile(safe_path):
+                    try:
+                        os.remove(safe_path)
+                        self.send_json({"success": True})
+                        return
+                    except Exception as e:
+                        self.send_json({"success": False, "error": str(e)}, status=500)
+                        return
+            self.send_json({"success": False, "error": "File not found"}, status=404)
+            return
+
+        elif path == "/api/files/clipboard":
+            text = payload.get("text", "")
+            updated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                with open(CLIPBOARD_FILE, "w", encoding="utf-8") as f:
+                    json.dump({"text": text, "updated_at": updated_at}, f, ensure_ascii=False)
+                self.send_json({"success": True, "updated_at": updated_at})
+            except Exception as e:
+                self.send_json({"success": False, "error": str(e)}, status=500)
             return
 
         self.send_error(404, "Not Found")

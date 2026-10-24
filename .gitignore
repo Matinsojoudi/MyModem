@@ -9,3 +9,8 @@ __pycache__/
 .vscode/
 .sessions.json
 auth_config.json
+shared_files/*
+!shared_files/.gitkeep
+.shared_clipboard.json
+cookies.txt
+
