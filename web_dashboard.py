@@ -3656,8 +3656,8 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             return
 
         elif path == "/api/lan/rooms":
-            host = self.headers.get("Host", "localhost").split(":")[0]
-            base_url = f"http://{host}:{PORT}"
+            lan_ip = get_local_lan_ip()
+            base_url = f"http://{lan_ip}:{PORT}"
             rooms_list = lan_chat_manager.get_rooms_list(base_url)
             self.send_json({"rooms": rooms_list})
             return
@@ -3969,8 +3969,8 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             if not name:
                 self.send_json({"ok": False, "error": "نام اتاق الزامی است"}, 400)
                 return
-            host = self.headers.get("Host", "localhost").split(":")[0]
-            base_url = f"http://{host}:{PORT}"
+            lan_ip = get_local_lan_ip()
+            base_url = f"http://{lan_ip}:{PORT}"
             room = lan_chat_manager.create_room(name)
             self.send_json({"ok": True, "room_id": room["id"], "url": f"{base_url}/room/{room['id']}"})
             return
