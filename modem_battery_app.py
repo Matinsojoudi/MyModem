@@ -100,7 +100,7 @@ def send_macos_notification(title: str, message: str, sound: str = "Ping"):
 
 class ModemBatteryApp(rumps.App):
     def __init__(self):
-        super(ModemBatteryApp, self).__init__("Modem", title="🔋 ...")
+        super(ModemBatteryApp, self).__init__("Modem", title="🔋 ...", quit_button=None)
 
         self.client = ModemClient()
 
