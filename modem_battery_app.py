@@ -89,13 +89,17 @@ def format_traffic_summary(rx_bytes, tx_bytes) -> str:
 
 
 def send_macos_notification(title: str, message: str, sound: str = "Ping"):
-    safe_title = title.replace('"', '\\"')
-    safe_msg = message.replace('"', '\\"')
-    script = f'display notification "{safe_msg}" with title "{safe_title}" sound name "{sound}"'
     try:
-        subprocess.run(["osascript", "-e", script], check=False, timeout=2)
-    except Exception as e:
-        print(f"Error sending notification: {e}", file=sys.stderr)
+        rumps.notification(title=title, subtitle="", message=message, sound=True)
+    except Exception:
+        # Fallback to osascript only if native Cocoa notification fails
+        safe_title = title.replace('"', '\\"')
+        safe_msg = message.replace('"', '\\"')
+        script = f'display notification "{safe_msg}" with title "{safe_title}" sound name "{sound}"'
+        try:
+            subprocess.run(["osascript", "-e", script], check=False, timeout=2)
+        except Exception as e:
+            print(f"Error sending notification: {e}", file=sys.stderr)
 
 
 class ModemBatteryApp(rumps.App):
