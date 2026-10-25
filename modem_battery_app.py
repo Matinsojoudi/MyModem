@@ -102,6 +102,13 @@ class ModemBatteryApp(rumps.App):
     def __init__(self):
         super(ModemBatteryApp, self).__init__("Modem", title="🔋 ...", quit_button=None)
 
+        # Hide icon from macOS Dock (pure background menu bar widget)
+        try:
+            from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+            NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+        except Exception as e:
+            print(f"[DockPolicy] Warning: {e}", file=sys.stderr)
+
         self.client = ModemClient()
 
         # State tracking
