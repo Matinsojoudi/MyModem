@@ -1415,8 +1415,8 @@ HTML_PAGE = """<!DOCTYPE html>
             <div class="form-row">
                 <label>محل ذخیره‌سازی:</label>
                 <select id="add-contact-loc" onchange="updateAddContactLimit()">
-                    <option value="0">سیم‌کارت (SIM - حداکثر ۱۴ کاراکتر فارسی)</option>
-                    <option value="1">حافظه مودم (Device - حداکثر ۳۰ کاراکتر)</option>
+                    <option value="1" selected>حافظه مودم (Device - ظرفیت بالا تا ۳۰ کاراکتر)</option>
+                    <option value="0">سیم‌کارت (SIM - حداکثر ۱۴ کاراکتر)</option>
                 </select>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
@@ -1515,6 +1515,28 @@ HTML_PAGE = """<!DOCTYPE html>
         let allContacts = [];
         let isBulkRunning = false;
         let shouldStopBulk = false;
+
+        function toEnglishDigits(str) {
+            if (!str) return '';
+            const fa = '۰۱۲۳۴۵۶۷۸۹';
+            const ar = '٠١٢٣٤٥٦٧٨٩';
+            return String(str)
+                .replace(/[۰-۹]/g, d => fa.indexOf(d))
+                .replace(/[٠-٩]/g, d => ar.indexOf(d));
+        }
+
+        function normalizePhoneNumber(phone) {
+            if (!phone) return '';
+            let clean = toEnglishDigits(String(phone)).replace(/[\\s\\-\\(\\)\\.\\+]/g, '').replace(/^;+/, '');
+            if (clean.startsWith('98') && clean.length >= 12) {
+                clean = '0' + clean.slice(2);
+            } else if (clean.startsWith('0098')) {
+                clean = '0' + clean.slice(4);
+            } else if (clean.length === 10 && clean.startsWith('9')) {
+                clean = '0' + clean;
+            }
+            return clean;
+        }
 
         // Theme Management
         function initTheme() {
@@ -1703,24 +1725,58 @@ HTML_PAGE = """<!DOCTYPE html>
         }
 
         function selectConversation(peerNumber) {
-            activePeer = peerNumber;
-            const conv = allConversations.find(c => c.peer_number === peerNumber);
-            if (conv) {
-                // Auto mark as read immediately when user views the chat
-                const unreadMsgs = (conv.messages || []).filter(m => m.is_unread && m.direction === 'in');
-                if (unreadMsgs.length > 0) {
-                    const unreadIds = unreadMsgs.map(m => m.id).filter(Boolean);
-                    conv.unread_count = 0;
-                    conv.messages.forEach(m => { m.is_unread = false; });
-                    fetch('/api/mark_conversation_read', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ ids: unreadIds })
-                    }).catch(console.error);
+            if (!peerNumber) return;
+            const normTarget = normalizePhoneNumber(peerNumber);
+            activePeer = normTarget || peerNumber;
+
+            // 1. Find existing conversation in allConversations
+            let conv = allConversations.find(c => {
+                return (c.peer_number && (normalizePhoneNumber(c.peer_number) === normTarget || c.peer_number === peerNumber));
+            });
+
+            // 2. If not found in conversations, synthesize one from contacts or raw number!
+            if (!conv) {
+                let foundName = '';
+                if (allContacts && allContacts.length > 0) {
+                    const cMatch = allContacts.find(c => {
+                        return (c.normalized_number && normalizePhoneNumber(c.normalized_number) === normTarget) ||
+                               (c.number && normalizePhoneNumber(c.number) === normTarget);
+                    });
+                    if (cMatch && cMatch.name && cMatch.name !== 'بی‌نام') {
+                        foundName = cMatch.name;
+                    }
                 }
-                renderConversationList(allConversations);
-                renderActiveChat(conv, true);
+
+                conv = {
+                    peer_number: activePeer,
+                    peer_name: foundName,
+                    display_name: foundName ? foundName : activePeer,
+                    last_message: '',
+                    last_time: '',
+                    raw_time: '',
+                    last_direction: 'out',
+                    unread_count: 0,
+                    messages: []
+                };
+
+                allConversations.unshift(conv);
             }
+
+            // Auto mark as read immediately when user views the chat
+            const unreadMsgs = (conv.messages || []).filter(m => m.is_unread && m.direction === 'in');
+            if (unreadMsgs.length > 0) {
+                const unreadIds = unreadMsgs.map(m => m.id).filter(Boolean);
+                conv.unread_count = 0;
+                conv.messages.forEach(m => { m.is_unread = false; });
+                fetch('/api/mark_conversation_read', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ids: unreadIds })
+                }).catch(console.error);
+            }
+
+            renderConversationList(allConversations);
+            renderActiveChat(conv, true);
         }
 
         function renderActiveChat(conv, forceScrollToBottom = false) {
@@ -1747,14 +1803,24 @@ HTML_PAGE = """<!DOCTYPE html>
             lastRenderedPeer = conv.peer_number;
 
             let msgsHtml = '';
-            (conv.messages || []).forEach(m => {
-                const isOut = m.direction === 'out';
-                const bubbleClass = isOut ? 'bubble-out' : 'bubble-in';
-                const timeStr = m.time || '';
-                const missedAlert = m.is_missed_call ? '<div style="font-weight:700; color:var(--danger); margin-bottom:4px;">تماس از دست رفته</div>' : '';
-                const cleanText = escapeHtml((m.text || '').trim());
-                msgsHtml += `<div class="chat-bubble ${bubbleClass}">${missedAlert}<div class="bubble-text">${cleanText}</div><div class="bubble-meta">${timeStr}</div></div>`;
-            });
+            if (!conv.messages || conv.messages.length === 0) {
+                msgsHtml = `
+                    <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-muted); padding:30px; text-align:center;">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.4; margin-bottom:10px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        <div style="font-weight:700; font-size:14px; margin-bottom:6px;">شروع گفتگو با ${escapeHtml(conv.display_name)}</div>
+                        <div style="font-size:12px;">هنوز پیامی در این گفتگو رد و بدل نشده است. می‌توانید اولین پیام خود را در کادر پایین بنویسید.</div>
+                    </div>
+                `;
+            } else {
+                conv.messages.forEach(m => {
+                    const isOut = m.direction === 'out';
+                    const bubbleClass = isOut ? 'bubble-out' : 'bubble-in';
+                    const timeStr = m.time || '';
+                    const missedAlert = m.is_missed_call ? '<div style="font-weight:700; color:var(--danger); margin-bottom:4px;">تماس از دست رفته</div>' : '';
+                    const cleanText = escapeHtml((m.text || '').trim());
+                    msgsHtml += `<div class="chat-bubble ${bubbleClass}">${missedAlert}<div class="bubble-text">${cleanText}</div><div class="bubble-meta">${timeStr}</div></div>`;
+                });
+            }
 
             // Prevent DOM thrashing if the messages haven't changed
             if (messagesScroll.innerHTML === msgsHtml && !isSwitchingPeer && !forceScrollToBottom) {
@@ -1813,7 +1879,33 @@ HTML_PAGE = """<!DOCTYPE html>
                     updateChatMetrics();
                     statusMsg.innerText = 'ارسال شد';
                     setTimeout(() => { statusMsg.innerText = ''; }, 3000);
-                    await loadConversations(true);
+
+                    // Optimistically append sent message to active chat
+                    const normActive = normalizePhoneNumber(activePeer);
+                    const targetConv = allConversations.find(c => {
+                        return (c.peer_number && (normalizePhoneNumber(c.peer_number) === normActive || c.peer_number === activePeer));
+                    });
+                    if (targetConv) {
+                        const now = new Date();
+                        const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+                        targetConv.messages.push({
+                            direction: 'out',
+                            text: text,
+                            time: `ساعت ${timeStr}`,
+                            is_unread: false,
+                            is_missed_call: false
+                        });
+                        targetConv.last_message = text;
+                        targetConv.last_time = `ساعت ${timeStr}`;
+                        targetConv.last_direction = 'out';
+                        renderActiveChat(targetConv, true);
+                        renderConversationList(allConversations);
+                    }
+
+                    setTimeout(async () => {
+                        await loadConversations(true);
+                        selectConversation(activePeer);
+                    }, 1500);
                 } else {
                     alert('خطا در ارسال پیامک از طریق مودم.');
                     statusMsg.innerText = 'ارسال ناموفق';
@@ -2048,7 +2140,7 @@ HTML_PAGE = """<!DOCTYPE html>
                         <div style="font-size:11px; color:var(--accent);">${c.group} • ${c.storage}</div>
                     </div>
                     <div class="contact-actions">
-                        <button class="btn-sm btn-primary" onclick="openChatWithContact('${c.normalized_number}')" title="شروع گفتگو">چت</button>
+                        <button class="btn-sm btn-primary" onclick="openChatWithContact('${c.normalized_number || c.number}')" title="شروع گفتگو">چت</button>
                         <button class="btn-sm btn-danger" onclick="deleteContact('${deleteId}')" title="حذف مخاطب">حذف</button>
                     </div>
                 </div>
@@ -2066,7 +2158,7 @@ HTML_PAGE = """<!DOCTYPE html>
         }
 
         function openChatWithContact(phone) {
-            document.querySelectorAll('.tab-btn')[0].click();
+            switchTab('chat');
             selectConversation(phone);
         }
 
@@ -2080,7 +2172,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 });
                 const d = await res.json();
                 if (d.success) {
-                    loadContacts();
+                    await loadContacts();
                 } else {
                     alert('خطا در حذف مخاطب از مودم.');
                 }
@@ -2090,33 +2182,87 @@ HTML_PAGE = """<!DOCTYPE html>
         }
 
         // Modals
-        function openNewChatModal() { document.getElementById('modal-new-chat').classList.add('active'); }
+        function openNewChatModal() { 
+            document.getElementById('modal-new-chat').classList.add('active'); 
+            setTimeout(() => {
+                const pInput = document.getElementById('new-chat-phone');
+                if (pInput) pInput.focus();
+            }, 100);
+        }
         function closeNewChatModal() { document.getElementById('modal-new-chat').classList.remove('active'); }
+
         async function submitNewChat() {
-            const phone = document.getElementById('new-chat-phone').value.trim();
+            let phone = document.getElementById('new-chat-phone').value.trim();
             const text = document.getElementById('new-chat-text').value.trim();
             if (!phone || !text) {
                 alert('شماره گیرنده و متن پیامک را وارد کنید.');
                 return;
             }
+            phone = toEnglishDigits(phone).replace(/[\\s\\-\\(\\)]/g, '');
+            const normPhone = normalizePhoneNumber(phone);
+            const targetPhone = normPhone || phone;
+
+            const submitBtn = document.querySelector('#modal-new-chat .btn-primary');
+            const origText = submitBtn ? submitBtn.innerText : '';
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerText = 'در حال ارسال...';
+            }
+
             try {
                 const res = await fetch('/api/send_sms', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ phone, text })
+                    body: JSON.stringify({ phone: targetPhone, text })
                 });
                 const d = await res.json();
                 if (d.success) {
                     closeNewChatModal();
                     document.getElementById('new-chat-phone').value = '';
                     document.getElementById('new-chat-text').value = '';
-                    await loadConversations();
-                    selectConversation(phone);
+
+                    // 1. Switch to chat tab
+                    switchTab('chat');
+
+                    // 2. Open / select the conversation
+                    selectConversation(targetPhone);
+
+                    // 3. Optimistically append the sent message into the active conversation
+                    const targetConv = allConversations.find(c => {
+                        return (c.peer_number && (normalizePhoneNumber(c.peer_number) === targetPhone || c.peer_number === targetPhone));
+                    });
+                    if (targetConv) {
+                        const now = new Date();
+                        const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+                        targetConv.messages.push({
+                            direction: 'out',
+                            text: text,
+                            time: `ساعت ${timeStr}`,
+                            is_unread: false,
+                            is_missed_call: false
+                        });
+                        targetConv.last_message = text;
+                        targetConv.last_time = `ساعت ${timeStr}`;
+                        targetConv.last_direction = 'out';
+                        renderActiveChat(targetConv, true);
+                        renderConversationList(allConversations);
+                    }
+
+                    // 4. Reload conversations in background after modem stores message
+                    setTimeout(async () => {
+                        await loadConversations(true);
+                        selectConversation(targetPhone);
+                    }, 1500);
                 } else {
-                    alert('خطا در ارسال پیامک.');
+                    alert('خطا در ارسال پیامک. لطفاً شارژ سیم‌کارت و اتصال مودم را بررسی کنید.');
                 }
             } catch (e) {
                 alert('خطا در برقراری ارتباط با سرور.');
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerText = origText;
+                }
             }
         }
 
@@ -2147,17 +2293,24 @@ HTML_PAGE = """<!DOCTYPE html>
         function openAddContactModal() {
             document.getElementById('modal-add-contact').classList.add('active');
             updateAddContactLimit();
+            setTimeout(() => {
+                const nInput = document.getElementById('add-contact-name');
+                if (nInput && !nInput.value) nInput.focus();
+            }, 100);
         }
         function closeAddContactModal() { document.getElementById('modal-add-contact').classList.remove('active'); }
+
         async function submitAddContact() {
-            const name = document.getElementById('add-contact-name').value.trim();
-            const number = document.getElementById('add-contact-number').value.trim();
+            let name = document.getElementById('add-contact-name').value.trim();
+            let number = document.getElementById('add-contact-number').value.trim();
             const group = document.getElementById('add-contact-group').value;
-            const location = document.getElementById('add-contact-loc').value;
+            const location = document.getElementById('add-contact-loc').value || '1';
             if (!name || !number) {
                 alert('لطفاً نام و شماره تلفن را وارد کنید.');
                 return;
             }
+
+            number = toEnglishDigits(number).replace(/[\\s\\-\\(\\)]/g, '');
 
             let isUnicode = false;
             for (let i = 0; i < name.length; i++) {
@@ -2172,6 +2325,13 @@ HTML_PAGE = """<!DOCTYPE html>
                 return;
             }
 
+            const submitBtn = document.querySelector('#modal-add-contact .btn-primary');
+            const origText = submitBtn ? submitBtn.innerText : '';
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerText = 'در حال ذخیره...';
+            }
+
             try {
                 const res = await fetch('/api/contacts/add', {
                     method: 'POST',
@@ -2183,13 +2343,18 @@ HTML_PAGE = """<!DOCTYPE html>
                     closeAddContactModal();
                     document.getElementById('add-contact-name').value = '';
                     document.getElementById('add-contact-number').value = '';
-                    loadContacts();
-                    loadConversations();
+                    await loadContacts();
+                    await loadConversations();
                 } else {
                     alert('خطا در ذخیره مخاطب روی مودم.');
                 }
             } catch (e) {
                 alert('خطای ارتباط با سرور.');
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerText = origText;
+                }
             }
         }
 
@@ -2200,7 +2365,7 @@ HTML_PAGE = """<!DOCTYPE html>
             } else {
                 container.innerHTML = allContacts.map((c, idx) => `
                     <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; padding:4px 6px;">
-                        <input type="checkbox" class="contact-pick-chk" value="${c.normalized_number}">
+                        <input type="checkbox" class="contact-pick-chk" value="${c.normalized_number || c.number}">
                         <span style="font-weight:600;">${c.name}</span>
                         <span style="color:var(--text-muted); direction:ltr;">(${c.number})</span>
                     </label>
@@ -3563,7 +3728,7 @@ class ModemDashboardHandler(http.server.BaseHTTPRequestHandler):
             return
 
         elif path == "/api/contacts":
-            contacts = client.get_phonebook()
+            contacts = client.get_phonebook(force_refresh=True)
             self.send_json(contacts)
             return
 

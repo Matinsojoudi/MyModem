@@ -160,12 +160,23 @@ def extract_name_and_number(raw_str: str) -> Tuple[str, str]:
     return s, ""
 
 
+PERSIAN_ARABIC_DIGITS_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def to_ascii_digits(s: str) -> str:
+    """Converts Persian and Arabic digits to standard ASCII 0-9 digits."""
+    if not s:
+        return ""
+    return str(s).translate(PERSIAN_ARABIC_DIGITS_MAP)
+
+
 def normalize_phone(phone: str) -> str:
     """Normalizes Iranian mobile numbers to standard 09xxxxxxxxx format."""
     if not phone:
         return ""
     _, num_part = extract_name_and_number(str(phone))
     target = num_part if num_part else str(phone)
+    target = to_ascii_digits(target)
     clean = re.sub(r'[\s\-\(\)\.\+]', '', target).lstrip(';')
     if clean.startswith('98') and len(clean) >= 12:
         clean = '0' + clean[2:]
@@ -406,7 +417,16 @@ class ModemClient:
 
     def send_sms(self, phone_number: str, message_text: str) -> bool:
         """Sends an SMS to one or more phone numbers (comma-separated)."""
-        clean_numbers = [p.strip() for p in phone_number.replace(";", ",").split(",") if p.strip()]
+        clean_raw = to_ascii_digits(str(phone_number))
+        clean_numbers = []
+        for p in clean_raw.replace(";", ",").split(","):
+            p_strip = p.strip()
+            if not p_strip:
+                continue
+            p_clean = re.sub(r'[^\d\+]', '', p_strip)
+            if p_clean:
+                clean_numbers.append(p_clean)
+
         if not clean_numbers or not message_text.strip():
             return False
             
@@ -587,33 +607,56 @@ class ModemClient:
             print(f"[ModemClient] get_phonebook error: {e}")
         return contacts if contacts else (self._phonebook_cache or [])
 
-    def add_contact(self, name: str, number: str, group: str = "common", location: str = "0") -> bool:
-        """Adds a contact to modem phonebook (location 0=SIM, 1=Device) with character limits."""
+    def add_contact(self, name: str, number: str, group: str = "common", location: str = "1") -> bool:
+        """Adds a contact to modem phonebook with automatic fallback from SIM to Device storage."""
         self._phonebook_time = 0
+        self._phonebook_cache = None
+
+        clean_number = to_ascii_digits(str(number))
+        clean_number = re.sub(r'[^\d\+]', '', clean_number).strip()
+        if not clean_number:
+            return False
+
+        clean_name = name.strip()
+        is_unicode = any(ord(c) > 127 for c in clean_name)
         
-        # Enforce SIM character limits (SIM UCS-2 Persian max 14, ASCII max 20, Device max 30)
-        is_unicode = any(ord(c) > 127 for c in name)
+        # Determine maximum allowed characters based on location
         if str(location) == "0":
             max_len = 14 if is_unicode else 20
         else:
             max_len = 30
-        clean_name = name.strip()[:max_len]
+        encoded_name = clean_name[:max_len]
 
         url = f"{self.base_url}?method=post&module=duster&file=json_pb_set{int(time.time()*1000)}"
         payload = {
             "pb_action": "pbm_contact_add",
             "location": str(location),
-            "name": uni_encode(clean_name),
-            "mobile": number.strip(),
+            "name": uni_encode(encoded_name),
+            "mobile": clean_number,
             "group": group
         }
         try:
             r = requests.post(url, json=payload, timeout=self.timeout)
-            if r.status_code == 200:
-                data = r.json()
-                return str(data.get("pb_result", "")) == "0"
+            if r.status_code == 200 and str(r.json().get("pb_result", "")) == "0":
+                self._phonebook_cache = None
+                self._phonebook_time = 0
+                return True
         except Exception as e:
             print(f"[ModemClient] add_contact error: {e}")
+
+        # If adding to SIM card (location 0) failed or was rejected, fallback to Device memory (location 1)
+        if str(location) == "0":
+            try:
+                payload["location"] = "1"
+                payload["name"] = uni_encode(clean_name[:30])
+                r = requests.post(url, json=payload, timeout=self.timeout)
+                if r.status_code == 200 and str(r.json().get("pb_result", "")) == "0":
+                    self._phonebook_cache = None
+                    self._phonebook_time = 0
+                    return True
+            except Exception as e:
+                print(f"[ModemClient] add_contact fallback error: {e}")
+
         return False
 
     def delete_contact(self, contact_id: str) -> bool:
