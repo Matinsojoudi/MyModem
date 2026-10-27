@@ -13,4 +13,7 @@ shared_files/*
 !shared_files/.gitkeep
 .shared_clipboard.json
 cookies.txt
+*.crt
+*.key
+MacSentinel/
 
