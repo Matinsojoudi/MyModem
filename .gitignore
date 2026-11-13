@@ -16,4 +16,7 @@ cookies.txt
 *.crt
 *.key
 MacSentinel/
+.build/
+dist/
+.swiftpm/
 

@@ -1,0 +1,321 @@
+import SwiftUI
+
+struct RootView: View {
+    @Bindable var state: AppState
+    var body: some View {
+        HStack(spacing: 0) {
+            BrandSidebar(state: state).frame(width: 236)
+            ZStack {
+                ModemTheme.canvas.ignoresSafeArea()
+                Group {
+                    switch state.selection {
+                    case .dashboard: DashboardView(state: state)
+                    case .messages: MessagesView(state: state)
+                    case .ussd: USSDView(state: state)
+                    case .devices: DevicesView(state: state)
+                    case .fileShare: FileShareView(server: state.fileShare)
+                    case .settings: SettingsView(state: state)
+                    }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.992)))
+                .id(state.selection)
+            }
+        }
+        .environment(\.layoutDirection, .rightToLeft)
+        .environment(\.colorScheme, .light)
+        .tint(ModemTheme.blue)
+        .animation(.easeOut(duration: 0.18), value: state.selection)
+        .alert("خطا", isPresented: Binding(get: { state.errorMessage != nil }, set: { if !$0 { state.errorMessage = nil } })) { Button("باشه") { state.errorMessage = nil } } message: { Text(state.errorMessage ?? "") }
+        .frame(minWidth: 1020, minHeight: 680)
+    }
+}
+
+struct BrandSidebar: View {
+    @Bindable var state: AppState
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                BrandMark(size: 44)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("MyModem").font(.system(size: 19, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                    Text("مرکز کنترل مودم").font(.caption).foregroundStyle(.white.opacity(0.78))
+                }
+            }.padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 30)
+            VStack(spacing: 7) {
+                ForEach(AppState.Section.allCases) { section in
+                    Button { state.selection = section } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: section.symbol).font(.system(size: 15, weight: .semibold)).frame(width: 22)
+                            Text(section.rawValue).font(.system(size: 14, weight: .medium, design: .rounded))
+                            Spacer()
+                        }
+                        .foregroundStyle(state.selection == section ? ModemTheme.navy : .white.opacity(0.78))
+                        .padding(.horizontal, 14).frame(height: 44)
+                        .background(state.selection == section ? Color.white : Color.clear, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    }.buttonStyle(.plain)
+                }
+            }.padding(.horizontal, 12)
+            Spacer()
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 9) {
+                    ZStack { Circle().fill((state.isOnline ? ModemTheme.success : ModemTheme.danger).opacity(0.2)).frame(width: 24, height: 24); Circle().fill(state.isOnline ? ModemTheme.success : ModemTheme.danger).frame(width: 8, height: 8) }
+                    VStack(alignment: .leading, spacing: 1) { Text(state.isOnline ? "مودم متصل است" : "مودم آفلاین است").font(.caption.bold()); Text(state.host).font(.caption2).opacity(0.6) }
+                    Spacer()
+                }
+                Button { Task { await state.refresh() } } label: { Label(state.isRefreshing ? "در حال بروزرسانی" : "تازه‌سازی", systemImage: "arrow.clockwise").frame(maxWidth: .infinity) }
+                    .buttonStyle(.borderless).foregroundStyle(.white.opacity(0.8)).disabled(state.isRefreshing)
+            }
+            .foregroundStyle(.white).padding(16)
+            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .padding(14)
+        }
+        .background(LinearGradient(colors: [ModemTheme.navyRaised, ModemTheme.navy], startPoint: .topLeading, endPoint: .bottomTrailing))
+        .environment(\.layoutDirection, .rightToLeft)
+    }
+}
+
+struct DashboardView: View {
+    let state: AppState
+    private let columns = [GridItem(.adaptive(minimum: 190), spacing: 14)]
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                PageHeader(title: "حال مودم چطور است؟", subtitle: state.lastUpdated.map { "آخرین بروزرسانی ساعت \($0.formatted(date: .omitted, time: .shortened))" } ?? "در انتظار نخستین اتصال")
+                if let status = state.status {
+                    HeroStatus(status: status)
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        MetricCard(title: "قدرت سیگنال", value: "\(status.signalQuality) / ۵", detail: signalLabel(status.signalQuality), symbol: "antenna.radiowaves.left.and.right", tint: ModemTheme.blue)
+                        MetricCard(title: "دستگاه‌های متصل", value: "\(status.connectedClients)", detail: "روی شبکهٔ Wi-Fi", symbol: "laptopcomputer.and.iphone", tint: ModemTheme.sky)
+                        MetricCard(title: "پیام تازه", value: "\(status.unreadMessages)", detail: status.unreadMessages == 0 ? "همه خوانده شده‌اند" : "در انتظار شما", symbol: "envelope.fill", tint: ModemTheme.warning)
+                        MetricCard(title: "زمان فعالیت", value: Formatters.duration(status.uptimeSeconds), detail: "از آخرین راه‌اندازی", symbol: "clock.fill", tint: ModemTheme.navyRaised)
+                    }
+                    HStack(spacing: 14) {
+                        TrafficCard(title: "دانلود", speed: Formatters.speed(status.downloadSpeed), total: Formatters.bytes(status.receivedBytes), symbol: "arrow.down", tint: ModemTheme.blue)
+                        TrafficCard(title: "آپلود", speed: Formatters.speed(status.uploadSpeed), total: Formatters.bytes(status.sentBytes), symbol: "arrow.up", tint: ModemTheme.success)
+                    }
+                } else { OfflineState() }
+            }.padding(30)
+        }
+    }
+    private func signalLabel(_ value: Int) -> String { [0: "بدون سیگنال", 1: "بسیار ضعیف", 2: "ضعیف", 3: "متوسط", 4: "خوب", 5: "عالی"][value] ?? "نامشخص" }
+}
+
+struct HeroStatus: View {
+    let status: ModemStatus
+    var body: some View {
+        HStack(spacing: 26) {
+            ZStack {
+                Circle().stroke(.white.opacity(0.16), lineWidth: 10)
+                Circle().trim(from: 0, to: CGFloat(status.batteryPercent) / 100).stroke(.white, style: StrokeStyle(lineWidth: 10, lineCap: .round)).rotationEffect(.degrees(-90))
+                VStack(spacing: 0) { Text("\(status.batteryPercent)%").font(.system(size: 27, weight: .bold, design: .rounded)); Image(systemName: status.isCharging ? "bolt.fill" : "battery.75percent").font(.caption) }
+            }.frame(width: 108, height: 108)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(status.isCharging ? "مودم در حال شارژ است" : "مودم آمادهٔ کار است").font(.system(size: 24, weight: .bold, design: .rounded))
+                Text(status.isCharging ? "باتری در حال پر شدن است؛ اتصال شبکه پایدار مانده." : "باتری در حال مصرف است؛ وضعیت شبکه را از اینجا دنبال کنید.").foregroundStyle(.white.opacity(0.90)).frame(maxWidth: 460, alignment: .leading)
+            }
+            Spacer()
+            Image(systemName: "wifi.router.fill").font(.system(size: 72, weight: .light)).foregroundStyle(.white.opacity(0.18))
+        }.foregroundStyle(.white).padding(26).background(LinearGradient(colors: [ModemTheme.blue, ModemTheme.navyRaised], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 25, style: .continuous)).shadow(color: ModemTheme.navy.opacity(0.16), radius: 24, y: 12)
+    }
+}
+
+struct MetricCard: View {
+    let title: String; let value: String; let detail: String; let symbol: String; let tint: Color
+    var body: some View { SoftCard { VStack(alignment: .leading, spacing: 13) { ZStack { RoundedRectangle(cornerRadius: 11).fill(tint.opacity(0.13)); Image(systemName: symbol).foregroundStyle(tint) }.frame(width: 39, height: 39); Text(title).font(.caption).foregroundStyle(ModemTheme.muted); Text(value).font(.system(size: 23, weight: .bold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.75); Text(detail).font(.caption).foregroundStyle(ModemTheme.muted) }.frame(maxWidth: .infinity, alignment: .leading) } }
+}
+
+struct TrafficCard: View {
+    let title: String; let speed: String; let total: String; let symbol: String; let tint: Color
+    var body: some View { SoftCard { HStack(spacing: 15) { ZStack { Circle().fill(tint.opacity(0.13)); Image(systemName: symbol).font(.headline.bold()).foregroundStyle(tint) }.frame(width: 48, height: 48); VStack(alignment: .leading, spacing: 3) { Text(title).font(.caption).foregroundStyle(ModemTheme.muted); Text(speed).font(.title3.bold()).monospacedDigit(); Text("مجموع \(total)").font(.caption2).foregroundStyle(ModemTheme.muted) }; Spacer() }.frame(maxWidth: .infinity) } }
+}
+
+struct MessagesView: View {
+    enum Mode: String, CaseIterable, Identifiable { case inbox = "پیام‌ها"; case contacts = "مخاطبین"; var id: String { rawValue } }
+    @Bindable var state: AppState
+    @State private var selected: SMSMessage?
+    @State private var mode: Mode = .inbox
+    @State private var contactSearch = ""
+
+    private var filteredContacts: [ModemContact] {
+        let query = contactSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return state.contacts }
+        return state.contacts.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.number.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                PageHeader(title: "پیام‌ها", subtitle: "صندوق و مخاطبین ذخیره‌شده روی مودم")
+                Spacer()
+                Picker("نمایش", selection: $mode) { ForEach(Mode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).frame(width: 230)
+            }.padding(30).padding(.bottom, 0)
+            Group {
+                if mode == .inbox {
+                    inbox
+                } else {
+                    contacts
+                }
+            }.transition(.opacity)
+        }.animation(.easeOut(duration: 0.15), value: mode)
+    }
+
+    private var inbox: some View {
+        HSplitView {
+            VStack(spacing: 0) {
+                List(state.messages, selection: $selected) { message in
+                    HStack(alignment: .top, spacing: 11) {
+                        ZStack { Circle().fill((message.isMissedCall ? ModemTheme.danger : ModemTheme.blue).opacity(0.12)); Image(systemName: message.isMissedCall ? "phone.arrow.down.left" : "message.fill").foregroundStyle(message.isMissedCall ? ModemTheme.danger : ModemTheme.blue) }.frame(width: 35, height: 35)
+                        VStack(alignment: .leading, spacing: 5) { HStack { Text(message.displaySender).fontWeight(message.isUnread ? .bold : .medium); if message.isUnread { Circle().fill(ModemTheme.blue).frame(width: 7, height: 7) }; Spacer() }; Text(message.text).lineLimit(2).font(.callout).foregroundStyle(ModemTheme.muted); Text(message.displayTime).font(.caption2).foregroundStyle(ModemTheme.muted) }
+                    }.padding(.vertical, 7).tag(message)
+                }.scrollContentBackground(.hidden)
+                ComposerView(state: state).padding(14)
+            }.frame(minWidth: 355).background(ModemTheme.surface.opacity(0.7))
+            MessageDetail(state: state, message: selected) { selected = nil }.frame(minWidth: 360)
+        }.padding(30).padding(.top, 10)
+    }
+
+    private var contacts: some View {
+        VStack(spacing: 16) {
+            HStack { Image(systemName: "magnifyingglass").foregroundStyle(ModemTheme.muted); TextField("جستجو در نام یا شماره", text: $contactSearch).textFieldStyle(ModemTextFieldStyle()); Text("\(filteredContacts.count) مخاطب").font(.caption).foregroundStyle(ModemTheme.muted) }
+            if filteredContacts.isEmpty {
+                SoftCard { ContentUnavailableView(state.contacts.isEmpty ? "مخاطبی روی مودم نیست" : "مخاطبی پیدا نشد", systemImage: "person.crop.circle.badge.questionmark", description: Text(state.contacts.isEmpty ? "مخاطبین سیم‌کارت و حافظهٔ مودم اینجا نمایش داده می‌شوند." : "عبارت جستجو را تغییر دهید.")) }.frame(maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], spacing: 14) {
+                        ForEach(filteredContacts) { contact in ContactCard(contact: contact) { state.compose(to: contact); mode = .inbox } }
+                    }.padding(.vertical, 2)
+                }
+            }
+        }.padding(30).padding(.top, 10)
+    }
+}
+
+struct ContactCard: View {
+    let contact: ModemContact
+    let compose: () -> Void
+    var body: some View {
+        SoftCard {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(LinearGradient(colors: [ModemTheme.sky.opacity(0.3), ModemTheme.blue.opacity(0.18)], startPoint: .top, endPoint: .bottom))
+                    Text(contact.initials).font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(ModemTheme.navy)
+                }.frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(contact.name).font(.headline).lineLimit(1)
+                    Text(contact.number.isEmpty ? "بدون شماره" : contact.number).font(.callout.monospacedDigit()).foregroundStyle(ModemTheme.muted).lineLimit(1)
+                    HStack(spacing: 5) { Text(contact.group); Text("•"); Text(contact.storage) }.font(.caption2).foregroundStyle(ModemTheme.muted)
+                }
+                Spacer()
+                Button(action: compose) { Image(systemName: "message.fill").frame(width: 30, height: 30) }
+                    .buttonStyle(.borderedProminent).tint(ModemTheme.blue).disabled(contact.number.isEmpty)
+                    .help("ارسال پیام به \(contact.name)")
+            }
+        }
+    }
+}
+
+struct MessageDetail: View {
+    let state: AppState; let message: SMSMessage?; let clear: () -> Void
+    var body: some View {
+        if let message {
+            SoftCard { VStack(alignment: .leading, spacing: 18) { HStack { VStack(alignment: .leading, spacing: 3) { Text(message.displaySender).font(.title2.bold()); Text(message.sender).font(.caption).foregroundStyle(ModemTheme.muted) }; Spacer(); if message.isMissedCall { Label("تماس ازدست‌رفته", systemImage: "phone.down.fill").foregroundStyle(ModemTheme.danger) } }; Divider(); Text(message.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading); Spacer(); HStack { Text(message.displayTime).font(.caption).foregroundStyle(ModemTheme.muted); Spacer(); if message.isUnread { Button("خوانده شد") { Task { await state.markRead(message) } } }; Button("حذف", role: .destructive) { Task { await state.delete(message); clear() } } } }.padding(4) }
+        } else { SoftCard { ContentUnavailableView("پیامی انتخاب نشده", systemImage: "bubble.left.and.bubble.right", description: Text("یک پیام را از فهرست انتخاب کنید.")) } }
+    }
+}
+
+struct ComposerView: View {
+    @Bindable var state: AppState
+    var body: some View { SoftCard { VStack(alignment: .leading, spacing: 9) { Text("پیام جدید").font(.headline); TextField("شماره گیرنده", text: $state.recipient).textFieldStyle(ModemTextFieldStyle()); TextEditor(text: $state.draft).foregroundStyle(ModemTheme.ink).tint(ModemTheme.blue).frame(minHeight: 58).scrollContentBackground(.hidden).padding(6).background(Color.white, in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(ModemTheme.line)); HStack { Text("\(state.draft.count) نویسه").font(.caption).foregroundStyle(ModemTheme.muted); Spacer(); Button("ارسال") { Task { await state.sendMessage() } }.buttonStyle(NavyButtonStyle()).disabled(state.isSending || state.recipient.isEmpty || state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } } }
+}
+
+struct USSDView: View {
+    @Bindable var state: AppState
+    let presets = ["*100#", "*140*11#", "*1#"]
+    var body: some View { VStack(alignment: .leading, spacing: 22) { PageHeader(title: "کد دستوری", subtitle: "اعتبار، بستهٔ اینترنت و خدمات اپراتور"); SoftCard { VStack(alignment: .leading, spacing: 16) { Text("کد موردنظر را وارد کنید").font(.headline); HStack { TextField("*100#", text: $state.ussdCode).textFieldStyle(ModemTextFieldStyle()).font(.title3.monospaced()); Button("شماره‌گیری") { Task { await state.sendUSSD() } }.buttonStyle(NavyButtonStyle()).disabled(state.isSending || state.ussdCode.isEmpty) }; HStack { Text("پیشنهادها").font(.caption).foregroundStyle(ModemTheme.muted); ForEach(presets, id: \.self) { code in Button(code) { state.ussdCode = code }.buttonStyle(.bordered) } } } }; SoftCard { VStack(alignment: .leading, spacing: 12) { Label("پاسخ شبکه", systemImage: "antenna.radiowaves.left.and.right").font(.headline).foregroundStyle(ModemTheme.blue); Text(state.ussdResponse.isEmpty ? "هنوز پاسخی دریافت نشده است." : state.ussdResponse).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).textSelection(.enabled).foregroundStyle(state.ussdResponse.isEmpty ? ModemTheme.muted : ModemTheme.ink) }.frame(minHeight: 220) }; Spacer() }.padding(30) }
+}
+
+struct DevicesView: View {
+    let state: AppState
+    var body: some View { VStack(alignment: .leading, spacing: 20) { PageHeader(title: "دستگاه‌های شبکه", subtitle: "اتصال و دسترسی کلاینت‌های مودم"); SoftCard { Table(state.devices) { TableColumn("نام") { d in Label(d.name, systemImage: d.isOnline ? "circle.fill" : d.isBlocked ? "nosign" : "circle").foregroundStyle(d.isOnline ? ModemTheme.success : d.isBlocked ? ModemTheme.danger : ModemTheme.muted) }; TableColumn("IP") { Text($0.ip).monospaced() }; TableColumn("MAC") { Text($0.mac).font(.caption.monospaced()) }; TableColumn("مصرف") { Text(Formatters.bytes($0.receivedBytes + $0.sentBytes)) }; TableColumn("") { d in Menu { Button("قطع اتصال") { Task { await state.manage(d, action: "1") } }; if d.isBlocked { Button("رفع مسدودی") { Task { await state.manage(d, action: "3") } } } else { Button("مسدود کردن", role: .destructive) { Task { await state.manage(d, action: "2") } } } } label: { Image(systemName: "ellipsis.circle") } } }.frame(minHeight: 420) } }.padding(30) }
+}
+
+struct FileShareView: View {
+    @Bindable var server: FileShareServer
+    @State private var isTargeted = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                PageHeader(title: "اشتراک فایل", subtitle: "ارسال مستقیم فایل به دستگاه‌های متصل به Wi-Fi مودم")
+                if let file = server.sharedFile, server.state == .running {
+                    activeShare(file)
+                } else {
+                    dropZone
+                }
+                securityNote
+            }.padding(30)
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
+            guard let provider = providers.first else { return false }
+            provider.loadDataRepresentation(forTypeIdentifier: "public.file-url") { data, _ in
+                guard let data, let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                Task { @MainActor in server.share(url: url) }
+            }
+            return true
+        }
+    }
+
+    private var dropZone: some View {
+        VStack(spacing: 18) {
+            ZStack { Circle().fill(ModemTheme.blue.opacity(0.12)).frame(width: 88, height: 88); Image(systemName: "arrow.up.doc.fill").font(.system(size: 34)).foregroundStyle(ModemTheme.blue) }
+            VStack(spacing: 7) { Text("فایل را اینجا رها کنید").font(.system(size: 22, weight: .bold, design: .rounded)); Text("یا از Finder یک فایل انتخاب کنید").foregroundStyle(ModemTheme.muted) }
+            Picker("مدت اشتراک", selection: $server.expirationMinutes) { Text("۱۵ دقیقه").tag(15); Text("۱ ساعت").tag(60); Text("۴ ساعت").tag(240) }.pickerStyle(.segmented).frame(maxWidth: 380)
+            Button("انتخاب فایل") { server.chooseFile() }.buttonStyle(NavyButtonStyle())
+            if case .failed(let message) = server.state { Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(ModemTheme.danger) }
+        }
+        .frame(maxWidth: .infinity, minHeight: 350)
+        .background(isTargeted ? ModemTheme.blue.opacity(0.12) : ModemTheme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(style: StrokeStyle(lineWidth: 2, dash: [8])).foregroundStyle(isTargeted ? ModemTheme.blue : ModemTheme.line))
+        .animation(.easeOut(duration: 0.12), value: isTargeted)
+    }
+
+    private func activeShare(_ file: SharedFile) -> some View {
+        HStack(alignment: .top, spacing: 22) {
+            SoftCard {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(spacing: 14) { ZStack { RoundedRectangle(cornerRadius: 14).fill(ModemTheme.blue.opacity(0.12)); Image(systemName: "doc.fill").font(.title2).foregroundStyle(ModemTheme.blue) }.frame(width: 52, height: 52); VStack(alignment: .leading, spacing: 3) { Text(file.name).font(.headline).lineLimit(2); Text(Formatters.bytes(file.size)).foregroundStyle(ModemTheme.muted) }; Spacer() }
+                    Divider()
+                    VStack(alignment: .leading, spacing: 7) { Text("لینک دانلود").font(.caption).foregroundStyle(ModemTheme.muted); Text(server.downloadURL?.absoluteString ?? "در حال راه‌اندازی…").font(.callout.monospaced()).textSelection(.enabled).foregroundStyle(ModemTheme.ink) }
+                    HStack { Button("کپی لینک") { server.copyLink() }.buttonStyle(NavyButtonStyle()); if let url = server.downloadURL { ShareLink(item: url) { Label("اشتراک لینک", systemImage: "square.and.arrow.up") } }; Spacer(); Button("توقف اشتراک", role: .destructive) { server.stop() } }
+                    HStack(spacing: 20) { Label("\(server.downloadCount) دانلود", systemImage: "arrow.down.circle"); Label("انقضا \(file.expiresAt.formatted(date: .omitted, time: .shortened))", systemImage: "timer") }.font(.caption).foregroundStyle(ModemTheme.muted)
+                }
+            }
+            SoftCard {
+                VStack(spacing: 12) {
+                    if let image = server.qrImage() { Image(nsImage: image).interpolation(.none).resizable().frame(width: 190, height: 190).accessibilityLabel("بارکد لینک دانلود") }
+                    Text("با دوربین موبایل اسکن کنید").font(.headline)
+                    Text("هر دو دستگاه باید به Wi-Fi مودم متصل باشند.").font(.caption).foregroundStyle(ModemTheme.muted).multilineTextAlignment(.center)
+                }.frame(width: 220)
+            }
+        }
+    }
+
+    private var securityNote: some View {
+        HStack(alignment: .top, spacing: 12) { Image(systemName: "lock.shield.fill").foregroundStyle(ModemTheme.success); VStack(alignment: .leading, spacing: 4) { Text("اشتراک امن در شبکهٔ محلی").font(.headline); Text("لینک با توکن تصادفی ساخته می‌شود، فهرست فایل عمومی وجود ندارد، مسیر واقعی فایل مخفی است و اشتراک در زمان انتخاب‌شده منقضی می‌شود.").font(.callout).foregroundStyle(ModemTheme.muted) } }.padding(18).background(ModemTheme.success.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+struct SettingsView: View {
+    @Bindable var state: AppState
+    @State private var rebootConfirmation = false
+    var body: some View { ScrollView { VStack(alignment: .leading, spacing: 20) { PageHeader(title: "تنظیمات", subtitle: "اتصال و رفتار برنامه"); SoftCard { VStack(alignment: .leading, spacing: 15) { Label("اتصال به مودم", systemImage: "network").font(.headline).foregroundStyle(ModemTheme.blue); TextField("آدرس IP مودم", text: $state.host).textFieldStyle(ModemTextFieldStyle()); Text("آدرس پیش‌فرض 192.168.1.1 است.").font(.caption).foregroundStyle(ModemTheme.muted); Button("آزمایش اتصال") { Task { await state.refresh() } }.buttonStyle(NavyButtonStyle()) } }; SoftCard { VStack(alignment: .leading, spacing: 14) { Label("مدیریت مودم", systemImage: "wifi.router").font(.headline).foregroundStyle(ModemTheme.blue); Link("باز کردن پنل مدیریت", destination: URL(string: "http://\(state.host)")!); Button("راه‌اندازی مجدد مودم", role: .destructive) { rebootConfirmation = true } } }; SoftCard { VStack(alignment: .leading, spacing: 8) { Text("MyModem Native").font(.headline); Text("Swift 6 · SwiftUI · نسخهٔ 1.0").foregroundStyle(ModemTheme.muted); Text("نسخهٔ بومی و مستقل؛ بدون Python یا وب‌سرور.").font(.caption).foregroundStyle(ModemTheme.muted) } } }.padding(30) }.confirmationDialog("مودم راه‌اندازی مجدد شود؟", isPresented: $rebootConfirmation) { Button("راه‌اندازی مجدد", role: .destructive) { Task { await state.reboot() } } } }
+}
+
+struct PageHeader: View {
+    let title: String; let subtitle: String
+    var body: some View { HStack(alignment: .center) { VStack(alignment: .leading, spacing: 5) { Text(title).font(.system(size: 29, weight: .bold, design: .rounded)).foregroundStyle(ModemTheme.ink); Text(subtitle).foregroundStyle(ModemTheme.muted) }; Spacer() } }
+}
+
+struct OfflineState: View {
+    var body: some View { SoftCard { ContentUnavailableView("مودم در دسترس نیست", systemImage: "wifi.slash", description: Text("به Wi-Fi مودم متصل شوید یا آدرس را در تنظیمات بررسی کنید.")) }.frame(minHeight: 320) }
+}

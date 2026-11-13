@@ -3,6 +3,7 @@
 <div align="center">
 
 ![macOS](https://img.shields.io/badge/macOS-12.0%2B-blue?logo=apple&style=for-the-badge)
+![Swift](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white&style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white&style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge)
@@ -13,9 +14,42 @@
   پایش هوشمند شارژ باتری، خواندن و ارسال پیامک، تشخیص تماس‌های بی‌پاسخ و مدیریت کدهای USSD مودم همراه در مک‌اواس.
 </p>
 
-[ویژگی‌ها](#-امکانات-و-ویژگیها) • [نصب سریع](#-نصب-و-راهاندازی-سریع) • [داشبورد وب](#-داشبورد-تحت-وب-web-dashboard) • [ابزار خط فرمان](#-ابزار-خط-فرمان-cli) • [Architecture](#-architecture)
+[اپ بومی Swift](#-اپ-بومی-macos--swiftui) • [ویژگی‌ها](#-امکانات-و-ویژگیها) • [نصب Python](#-نصب-نسخه-python) • [داشبورد وب](#-داشبورد-تحت-وب-web-dashboard) • [ابزار خط فرمان](#-ابزار-خط-فرمان-cli)
 
 </div>
+
+---
+
+## 🍎 اپ بومی macOS — SwiftUI
+
+از نسخه **2.0.0**، MyModem یک اپ مستقل و بومی macOS با **Swift 6 و SwiftUI** دارد. این اپ بدون Python یا وب‌سرور مستقیماً با مودم ارتباط می‌گیرد.
+
+### دانلود
+
+نسخهٔ آماده را از صفحهٔ [GitHub Releases](https://github.com/Matinsojoudi/MyModem/releases/latest) دریافت کنید، فایل ZIP را باز کنید و `MyModem.app` را اجرا کنید. حداقل سیستم موردنیاز **macOS 14** است.
+
+### قابلیت‌های نسخه Swift
+
+- داشبورد بومی با تم سرمه‌ای، لوگوی اختصاصی و آیتم منوبار
+- نمایش باتری، شارژ، سیگنال، سرعت، ترافیک و زمان فعالیت
+- خواندن، ارسال، حذف و علامت‌گذاری پیامک با پشتیبانی فارسی و ایموجی
+- نمایش مخاطبین سیم‌کارت و مودم، جستجو و ارسال مستقیم پیام
+- تشخیص تماس ازدست‌رفته و اجرای USSD
+- مشاهده، قطع و مسدودکردن دستگاه‌های متصل
+- اشتراک امن فایل روی Wi-Fi مودم با Drag & Drop، لینک تصادفی، QR Code و انقضای خودکار
+- اعلان‌های بومی macOS و تست‌های Swift با کنترل کنتراست WCAG AA
+
+### ساخت از سورس
+
+```bash
+git clone https://github.com/Matinsojoudi/MyModem.git
+cd MyModem
+swift test
+./build-app.sh
+open dist/MyModem.app
+```
+
+جزئیات بیشتر: [NATIVE_APP.md](NATIVE_APP.md)
 
 ---
 
@@ -73,7 +107,7 @@ graph TD
 
 ---
 
-## 🚀 نصب و راه‌اندازی سریع
+## 🚀 نصب نسخه Python
 
 ### پیش‌نیازها
 - سیستم‌عامل **macOS** (نسخه Monterey به بعد)
