@@ -70,9 +70,9 @@ struct ChatView: View {
                 if let link = roomLink(room) {
                     Button("تماس صوتی/تصویری", systemImage: "video.fill") { NSWorkspace.shared.open(link) }
                         .help("صفحهٔ اتاق در مرورگر باز می‌شود؛ میکروفون و دوربین همان‌جا استفاده می‌شوند.")
-                    Button { NSWorkspace.shared.open(link) } label: { Image(systemName: "safari") }
+                    Button { NSWorkspace.shared.open(link) } label: { Image(systemName: "safari") }.accessibilityLabel("باز کردن اتاق در مرورگر")
                 }
-                Button(role: .destructive) { hub.chat.deleteRoom(room); selectedRoom = nil } label: { Image(systemName: "trash") }
+                Button(role: .destructive) { hub.chat.deleteRoom(room); selectedRoom = nil } label: { Image(systemName: "trash") }.accessibilityLabel("حذف اتاق \(room.title)")
             }.padding(14).background(ModemTheme.surface)
 
             ScrollView {

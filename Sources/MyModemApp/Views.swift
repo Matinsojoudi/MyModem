@@ -286,7 +286,7 @@ struct ContactCard: View {
                         .help("ارسال پیام به \(contact.name)")
                     HStack(spacing: 5) {
                         Button(action: edit) { Image(systemName: "pencil").frame(width: 20, height: 20) }.buttonStyle(.borderless).foregroundStyle(ModemTheme.blue).help("ویرایش یا انتقال")
-                        Button(action: delete) { Image(systemName: "trash").frame(width: 20, height: 20) }.buttonStyle(.borderless).foregroundStyle(ModemTheme.danger).help("حذف مخاطب")
+                        Button(action: delete) { Image(systemName: "trash").frame(width: 20, height: 20) }.buttonStyle(.borderless).foregroundStyle(ModemTheme.danger).help("حذف مخاطب").accessibilityLabel("حذف مخاطب \(contact.name)")
                     }
                 }
             }
@@ -616,7 +616,7 @@ struct SettingsView: View {
                 SoftCard {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("درباره", systemImage: "info.circle").font(.headline).foregroundStyle(ModemTheme.blue)
-                        LabeledContent("نسخه", value: "2.6.0")
+                        LabeledContent("نسخه", value: "2.7.0")
                         LabeledContent("پیاده‌سازی", value: "Swift 6 + SwiftUI")
                         Text("نسخهٔ بومی، مستقل و بدون Python یا وب‌سرور. تماس سیم‌کارتی توسط این مودم پشتیبانی نمی‌شود؛ تشخیص تماس ازدست‌رفته بر پایهٔ پیامک اپراتور است.").font(.caption).foregroundStyle(ModemTheme.muted)
                     }
