@@ -15,6 +15,7 @@ struct RootView: View {
                     case .devices: DevicesView(state: state)
                     case .network: NetworkView(state: state)
                     case .fileShare: FileShareView(server: state.fileShare)
+                    case .transfer: TransferView(hub: state.lanHub)
                     case .settings: SettingsView(state: state)
                     }
                 }

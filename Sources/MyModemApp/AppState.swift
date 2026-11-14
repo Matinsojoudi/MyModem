@@ -11,7 +11,8 @@ final class AppState {
         case ussd = "کد دستوری"
         case devices = "دستگاه‌ها"
         case network = "شبکه و DNS"
-        case fileShare = "اشتراک فایل"
+        case fileShare = "ارسال سریع"
+        case transfer = "کتابخانه و کلیپ‌بورد"
         case settings = "تنظیمات"
         var id: String { rawValue }
         var symbol: String {
@@ -22,6 +23,7 @@ final class AppState {
             case .devices: "wifi.router.fill"
             case .network: "network"
             case .fileShare: "square.and.arrow.up.fill"
+            case .transfer: "folder.badge.gearshape"
             case .settings: "gearshape.fill"
             }
         }
@@ -56,6 +58,7 @@ final class AppState {
     var customDNS2 = ""
     var rebootPhase: RebootPhase = .idle
     let fileShare = FileShareServer()
+    let lanHub = LANHub()
 
     private let client: ModemClient
     private var refreshTask: Task<Void, Never>?
@@ -86,7 +89,7 @@ final class AppState {
         }
     }
 
-    func stop() { refreshTask?.cancel(); refreshTask = nil; fileShare.stop() }
+    func stop() { refreshTask?.cancel(); refreshTask = nil; fileShare.stop(); lanHub.stop() }
 
     func refresh() async {
         guard !isRefreshing else { return }
