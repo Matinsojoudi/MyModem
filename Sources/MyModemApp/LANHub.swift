@@ -19,6 +19,7 @@ final class LANHub {
     let auth = LANAuth()
     let library = FileLibrary()
     let clipboard = ClipboardStore()
+    let chat = ChatManager()
 
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: HTTPConnection] = [:]
@@ -115,6 +116,51 @@ final class LANHub {
         case ("GET", "/"): sendGuestPage(request, connection)
         case ("GET", "/pair"): handlePairGet(request, connection)
         case ("POST", "/api/pair"): handlePairPost(request, connection)
+        case ("GET", "/chat"): withAuth(request, connection) { [self] device in
+            guard let roomID = request.query["room"], chat.room(id: roomID) != nil else {
+                sendHTML(chatIndexPage(device: device), connection); return
+            }
+            chat.touch(participant: device.id, name: device.name)
+            sendHTML(chatRoomPage(roomID: roomID, device: device), connection)
+        }
+        case ("GET", "/api/chat/rooms"): withAuth(request, connection) { [self] _ in
+            let list = chat.rooms.map { ["id": $0.id, "title": $0.title, "count": String($0.messages.count)] }
+            sendJSON(["rooms": list], connection)
+        }
+        case ("POST", "/api/chat/create"): withAuth(request, connection) { [self] _ in
+            let room = chat.createRoom(title: request.json["title"] as? String ?? "")
+            sendJSON(["id": room.id, "title": room.title], connection)
+        }
+        case ("POST", "/api/chat/send"): withAuth(request, connection) { [self] device in
+            guard let roomID = request.json["room"] as? String, let text = request.json["text"] as? String else {
+                sendJSON(["error": "missing fields"], connection, status: "400 Bad Request"); return
+            }
+            chat.touch(participant: device.id, name: device.name)
+            guard chat.post(roomID: roomID, senderID: device.id, senderName: device.name, text: text) != nil else {
+                sendJSON(["error": "rejected"], connection, status: "400 Bad Request"); return
+            }
+            sendJSON(["ok": true], connection)
+        }
+        case ("GET", "/api/chat/poll"): withAuth(request, connection) { [self] device in
+            guard let roomID = request.query["room"] else { sendJSON(["error": "missing room"], connection, status: "400 Bad Request"); return }
+            chat.touch(participant: device.id, name: device.name)
+            let since = request.query["since"].flatMap { ISO8601DateFormatter().date(from: $0) }
+            let messages = chat.messages(in: roomID, after: since).map { message in
+                ["id": message.id, "sender": message.senderName, "self": String(message.senderID == device.id), "text": message.text, "at": ISO8601DateFormatter().string(from: message.createdAt)]
+            }
+            let signals = chat.signals(for: roomID, recipient: device.id, after: since).map { signal in
+                ["from": signal.fromID, "type": signal.type, "data": signal.payload]
+            }
+            let people = chat.participants().map { ["id": $0.id, "name": $0.name] }
+            sendJSON(["messages": messages, "signals": signals, "participants": people, "now": ISO8601DateFormatter().string(from: Date())], connection)
+        }
+        case ("POST", "/api/chat/signal"): withAuth(request, connection) { [self] device in
+            guard let roomID = request.json["room"] as? String, let type = request.json["type"] as? String else {
+                sendJSON(["error": "missing fields"], connection, status: "400 Bad Request"); return
+            }
+            chat.addSignal(roomID: roomID, from: device.id, to: request.json["to"] as? String ?? "*", type: type, payload: request.json["data"] as? String ?? "")
+            sendJSON(["ok": true], connection)
+        }
         case ("GET", "/api/files"): withAuth(request, connection) { [self] device in
             let list = library.files.map { ["id": $0.id, "name": $0.fileName, "size": String($0.size), "downloads": String($0.downloads)] }
             sendJSON(["files": list, "device": device.name], connection)
@@ -305,6 +351,113 @@ final class LANHub {
         async function save(){await fetch('/api/clipboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:document.getElementById('c').value})});}
         async function load(){const r=await fetch('/api/clipboard');const j=await r.json();document.getElementById('c').value=j.text||'';}
         load();
+        </script></body></html>
+        """
+    }
+
+    private func chatIndexPage(device: PairedDevice) -> String {
+        let rows = chat.rooms.map { room in
+            "<li><a href=\"/chat?room=\(room.id)\">\(escape(room.title))</a><span class=\"muted\">\(room.messages.count) پیام</span></li>"
+        }.joined()
+        return """
+        <!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1"><title>گفتگوی LAN</title>
+        <style>body{font-family:-apple-system,system-ui,sans-serif;background:#EAF3FA;color:#0F253D;margin:0}
+        header{background:linear-gradient(135deg,#1464A5,#0A2342);color:#fff;padding:20px}
+        main{padding:18px;display:grid;gap:14px}section{background:#fff;border-radius:16px;padding:16px}
+        ul{list-style:none;padding:0;margin:0;display:grid;gap:8px}
+        li{display:flex;justify-content:space-between;border:1px solid #CDDEEB;border-radius:10px;padding:10px}
+        a{color:#1464A5;font-weight:600;text-decoration:none}.muted{color:#587088;font-size:13px}</style></head><body>
+        <header><h1 style="margin:0;font-size:18px">گفتگوی شبکهٔ محلی</h1><div class="muted" style="color:#cfe3f5">شما: \(escape(device.name))</div></header>
+        <main><section><h3>اتاق‌ها</h3><ul>\(rows.isEmpty ? "<li class=\"muted\">اتاقی ساخته نشده است</li>" : rows)</ul></section>
+        <section class="muted">برای ساخت اتاق یا تماس، از برنامهٔ مک استفاده کنید.</section></main></body></html>
+        """
+    }
+
+    private func chatRoomPage(roomID: String, device: PairedDevice) -> String {
+        let title = chat.room(id: roomID)?.title ?? "اتاق"
+        return """
+        <!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1"><title>\(escape(title))</title>
+        <style>body{font-family:-apple-system,system-ui,sans-serif;background:#EAF3FA;color:#0F253D;margin:0;display:flex;flex-direction:column;height:100vh}
+        header{background:linear-gradient(135deg,#1464A5,#0A2342);color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+        #log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+        .msg{max-width:78%;padding:9px 12px;border-radius:13px;background:#fff;border:1px solid #CDDEEB;white-space:pre-wrap;word-break:break-word}
+        .self{align-self:flex-start;background:#1464A5;color:#fff;border:0}
+        .who{font-size:11px;opacity:.7;margin-bottom:3px}
+        footer{display:flex;gap:8px;padding:10px;background:#fff;border-top:1px solid #CDDEEB}
+        input{flex:1;padding:11px;border:1px solid #CDDEEB;border-radius:10px;font:inherit}
+        button{background:#1464A5;color:#fff;border:0;border-radius:999px;padding:9px 14px;font-weight:600}
+        button.ghost{background:rgba(255,255,255,.18)}
+        .muted{color:#587088;font-size:12px}
+        #overlay{position:fixed;inset:0;background:#0A2342f2;color:#fff;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9}
+        #overlay video{width:min(90vw,420px);border-radius:16px;background:#000}
+        #overlay .bar{display:flex;gap:10px}
+        </style></head><body>
+        <header>
+          <div><strong>\(escape(title))</strong><div class="muted" style="color:#cfe3f5">\(escape(device.name))</div></div>
+          <div class="muted" id="people" style="color:#cfe3f5">—</div>
+        </header>
+        <div id="log"></div>
+        <footer><input id="text" placeholder="پیام…"><button onclick="send()">ارسال</button></footer>
+        <div id="overlay">
+          <video id="remote" autoplay playsinline></video>
+          <div class="bar"><button class="ghost" onclick="mute()">بی‌صدا</button><button onclick="hangup()">پایان تماس</button></div>
+          <div class="muted" style="color:#cfe3f5" id="callstate">در حال اتصال…</div>
+        </div>
+        <script>
+        const ROOM="\(roomID)", ME="\(device.id)";
+        let last=null, pc=null, localStream=null, peerID=null, pendingICE=[];
+        function add(m){const d=document.createElement('div');d.className='msg'+(m.self==='true'?' self':'');
+          const who=document.createElement('div');who.className='who';who.textContent=m.sender;
+          const body=document.createElement('div');body.textContent=m.text;d.append(who,body);
+          document.getElementById('log').appendChild(d);document.getElementById('log').scrollTop=1e9;}
+        async function send(){const el=document.getElementById('text');const t=el.value.trim();if(!t)return;el.value='';
+          await fetch('/api/chat/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room:ROOM,text:t})});}
+        async function signal(type,to,data){await fetch('/api/chat/signal',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({room:ROOM,to:to,type:type,data:JSON.stringify(data)})});}
+        async function poll(){
+          try{
+            const r=await fetch('/api/chat/poll?room='+ROOM+(last?'&since='+encodeURIComponent(last):''));
+            const j=await r.json();(j.messages||[]).forEach(add);last=j.now;
+            const box=document.getElementById('people');box.innerHTML='';
+            (j.participants||[]).forEach(p=>{
+              if(p.id===ME){return;}
+              const b=document.createElement('button');b.className='ghost';b.textContent='تماس با '+p.name;
+              b.onclick=()=>call(p.id,true);box.appendChild(b);});
+            for(const s of (j.signals||[])){handleSignal(s);}
+          }catch(e){}
+          setTimeout(poll,1200);
+        }
+        async function handleSignal(s){
+          const from=s.from, data=JSON.parse(s.data||'{}');
+          if(s.type==='offer'){peerID=from;await call(from,false,data);}
+          else if(s.type==='answer'&&pc){await pc.setRemoteDescription(data);flushICE();}
+          else if(s.type==='ice'&&pc){if(pc.remoteDescription)await pc.addIceCandidate(data);else pendingICE.push(data);}
+          else if(s.type==='bye'){cleanup();}
+        }
+        function flushICE(){pendingICE.forEach(c=>pc.addIceCandidate(c));pendingICE=[];}
+        async function call(target,initiator,offer){
+          if(pc){return;}
+          peerID=target;
+          document.getElementById('overlay').style.display='flex';
+          document.getElementById('callstate').textContent='در حال اتصال…';
+          try{localStream=await navigator.mediaDevices.getUserMedia({audio:true,video:true});}
+          catch(e){document.getElementById('callstate').textContent='دسترسی به میکروفون/دوربین داده نشد';return;}
+          pc=new RTCPeerConnection({iceServers:[]});
+          localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
+          pc.ontrack=e=>{document.getElementById('remote').srcObject=e.streams[0];};
+          pc.onicecandidate=e=>{if(e.candidate)signal('ice',target,e.candidate);};
+          pc.onconnectionstatechange=()=>{if(pc&&pc.connectionState==='connected')document.getElementById('callstate').textContent='تماس برقرار است';};
+          if(initiator){const o=await pc.createOffer();await pc.setLocalDescription(o);await signal('offer',target,o);}
+          else{await pc.setRemoteDescription(offer);const a=await pc.createAnswer();await pc.setLocalDescription(a);await signal('answer',target,a);}
+        }
+        function mute(){if(!localStream)return;localStream.getAudioTracks().forEach(t=>t.enabled=!t.enabled);}
+        function hangup(){if(peerID)signal('bye',peerID,{});cleanup();}
+        function cleanup(){if(pc){pc.close();pc=null;}if(localStream){localStream.getTracks().forEach(t=>t.stop());localStream=null;}
+          document.getElementById('remote').srcObject=null;document.getElementById('overlay').style.display='none';peerID=null;pendingICE=[];}
+        document.getElementById('text').addEventListener('keydown',e=>{if(e.key==='Enter')send();});
+        poll();
         </script></body></html>
         """
     }

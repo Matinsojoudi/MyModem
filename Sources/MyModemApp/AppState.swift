@@ -13,6 +13,7 @@ final class AppState {
         case network = "شبکه و DNS"
         case fileShare = "ارسال سریع"
         case transfer = "کتابخانه و کلیپ‌بورد"
+        case chat = "گفتگوی LAN"
         case settings = "تنظیمات"
         var id: String { rawValue }
         var symbol: String {
@@ -24,6 +25,7 @@ final class AppState {
             case .network: "network"
             case .fileShare: "square.and.arrow.up.fill"
             case .transfer: "folder.badge.gearshape"
+            case .chat: "bubble.left.and.bubble.right.fill"
             case .settings: "gearshape.fill"
             }
         }
