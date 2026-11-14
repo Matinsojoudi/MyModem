@@ -50,9 +50,13 @@ struct BrandSidebar: View {
                             Spacer()
                         }
                         .foregroundStyle(state.selection == section ? ModemTheme.navy : .white.opacity(0.78))
-                        .padding(.horizontal, 14).frame(height: 44)
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44, alignment: .leading)
                         .background(state.selection == section ? Color.white : Color.clear, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    }.buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
                 }
             }.padding(.horizontal, 12)
             Spacer()

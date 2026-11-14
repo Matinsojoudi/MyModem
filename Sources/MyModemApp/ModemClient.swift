@@ -3,18 +3,18 @@ import Foundation
 actor ModemClient {
     private let codec = ModemCodec()
     private let dateFormatter = JalaliDateFormatter()
-    private var host: String
+    private var host: ModemHost
     private let session: URLSession
 
     init(host: String = "192.168.1.1") {
-        self.host = host
+        self.host = (try? ModemHost(host)) ?? (try! ModemHost("192.168.1.1"))
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 5
         configuration.timeoutIntervalForResource = 12
         session = URLSession(configuration: configuration)
     }
 
-    func updateHost(_ host: String) { self.host = host }
+    func updateHost(_ host: String) throws { self.host = try ModemHost(host) }
 
     func status() async throws -> ModemStatus {
         ModemStatus(json: try await get(file: "json_status_info"))
@@ -138,7 +138,7 @@ actor ModemClient {
     private func post(file: String, payload: [String: Any]) async throws -> [String: Any] { try await request(file: file, method: "post", payload: payload) }
 
     private func request(file: String, method: String, payload: [String: Any]?) async throws -> [String: Any] {
-        var components = URLComponents(string: "http://\(host)/xml_action.cgi")
+        var components = URLComponents(string: "http://\(host.value)/xml_action.cgi")
         components?.queryItems = [.init(name: "method", value: method), .init(name: "module", value: "duster"), .init(name: "file", value: file + String(Int(Date().timeIntervalSince1970 * 1000)))]
         guard let url = components?.url else { throw ModemError.invalidAddress }
         var request = URLRequest(url: url)

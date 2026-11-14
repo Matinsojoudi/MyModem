@@ -23,8 +23,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key><string>MyModem</string>
   <key>CFBundleIconFile</key><string>MyModem</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>2.0.0</string>
-  <key>CFBundleVersion</key><string>20000</string>
+  <key>CFBundleShortVersionString</key><string>2.1.0</string>
+  <key>CFBundleVersion</key><string>20100</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSLocalNetworkUsageDescription</key><string>MyModem برای دریافت وضعیت، پیامک و مدیریت دستگاه‌ها به مودم شبکه محلی متصل می‌شود.</string>

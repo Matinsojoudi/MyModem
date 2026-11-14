@@ -8,7 +8,6 @@ struct MyModemApplication: App {
         WindowGroup("MyModem") {
             RootView(state: state)
                 .task { state.start() }
-                .onDisappear { state.stop() }
         }
         .defaultSize(width: 1100, height: 720)
         .commands {

@@ -87,6 +87,21 @@ struct DHCPInfo: Sendable {
     let ip: String
 }
 
+enum LoadFreshness: Sendable, Equatable {
+    case idle
+    case loading
+    case fresh(Date)
+    case stale(Date, String)
+    case failed(String)
+
+    var hasError: Bool {
+        switch self {
+        case .stale, .failed: true
+        default: false
+        }
+    }
+}
+
 enum ModemError: LocalizedError, Sendable {
     case invalidAddress
     case invalidResponse
