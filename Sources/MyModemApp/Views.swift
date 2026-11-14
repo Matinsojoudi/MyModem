@@ -13,6 +13,7 @@ struct RootView: View {
                     case .messages: MessagesView(state: state)
                     case .ussd: USSDView(state: state)
                     case .devices: DevicesView(state: state)
+                    case .network: NetworkView(state: state)
                     case .fileShare: FileShareView(server: state.fileShare)
                     case .settings: SettingsView(state: state)
                     }
@@ -343,13 +344,152 @@ struct ComposerView: View {
 
 struct USSDView: View {
     @Bindable var state: AppState
-    let presets = ["*100#", "*140*11#", "*1#"]
-    var body: some View { VStack(alignment: .leading, spacing: 22) { PageHeader(title: "کد دستوری", subtitle: "اعتبار، بستهٔ اینترنت و خدمات اپراتور"); SoftCard { VStack(alignment: .leading, spacing: 16) { Text("کد موردنظر را وارد کنید").font(.headline); HStack { TextField("*100#", text: $state.ussdCode).textFieldStyle(ModemTextFieldStyle()).font(.title3.monospaced()); Button("شماره‌گیری") { Task { await state.sendUSSD() } }.buttonStyle(NavyButtonStyle()).disabled(state.isSending || state.ussdCode.isEmpty) }; HStack { Text("پیشنهادها").font(.caption).foregroundStyle(ModemTheme.muted); ForEach(presets, id: \.self) { code in Button(code) { state.ussdCode = code }.buttonStyle(.bordered) } } } }; SoftCard { VStack(alignment: .leading, spacing: 12) { Label("پاسخ شبکه", systemImage: "antenna.radiowaves.left.and.right").font(.headline).foregroundStyle(ModemTheme.blue); Text(state.ussdResponse.isEmpty ? "هنوز پاسخی دریافت نشده است." : state.ussdResponse).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).textSelection(.enabled).foregroundStyle(state.ussdResponse.isEmpty ? ModemTheme.muted : ModemTheme.ink) }.frame(minHeight: 220) }; Spacer() }.padding(30) }
+    @AppStorage("ussdPresets") private var presetsRaw = "*100#,*140*11#,*1#"
+    private var presets: [String] { presetsRaw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            PageHeader(title: "کد دستوری", subtitle: "اعتبار، بستهٔ اینترنت و خدمات اپراتور")
+            SoftCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("کد موردنظر را وارد کنید").font(.headline)
+                    HStack {
+                        TextField("*100#", text: $state.ussdCode).textFieldStyle(ModemTextFieldStyle()).font(.title3.monospaced())
+                        Button("شماره‌گیری") { Task { await state.sendUSSD() } }.buttonStyle(NavyButtonStyle()).disabled(state.isSending || state.ussdCode.isEmpty)
+                    }
+                    HStack(spacing: 8) {
+                        Text("پیشنهادها").font(.caption).foregroundStyle(ModemTheme.muted)
+                        ForEach(presets, id: \.self) { code in Button(code) { state.ussdCode = code }.buttonStyle(.bordered) }
+                    }
+                }
+            }
+            SoftCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("پاسخ شبکه", systemImage: "antenna.radiowaves.left.and.right").font(.headline).foregroundStyle(ModemTheme.blue)
+                    Text(state.ussdResponse.isEmpty ? "هنوز پاسخی دریافت نشده است." : state.ussdResponse)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .textSelection(.enabled)
+                        .foregroundStyle(state.ussdResponse.isEmpty ? ModemTheme.muted : ModemTheme.ink)
+                }.frame(minHeight: 220)
+            }
+            Label("USSD یک نشست سیگنالینگ است، نه تماس صوتی. مودم‌های دیتا ممکن است پاسخ برخی کدها را از شبکه دریافت نکنند.", systemImage: "info.circle").font(.caption).foregroundStyle(ModemTheme.muted)
+            Spacer()
+        }.padding(30)
+    }
 }
 
 struct DevicesView: View {
     let state: AppState
-    var body: some View { VStack(alignment: .leading, spacing: 20) { PageHeader(title: "دستگاه‌های شبکه", subtitle: "اتصال و دسترسی کلاینت‌های مودم"); SoftCard { Table(state.devices) { TableColumn("نام") { d in Label(d.name, systemImage: d.isOnline ? "circle.fill" : d.isBlocked ? "nosign" : "circle").foregroundStyle(d.isOnline ? ModemTheme.success : d.isBlocked ? ModemTheme.danger : ModemTheme.muted) }; TableColumn("IP") { Text($0.ip).monospaced() }; TableColumn("MAC") { Text($0.mac).font(.caption.monospaced()) }; TableColumn("مصرف") { Text(Formatters.bytes($0.receivedBytes + $0.sentBytes)) }; TableColumn("") { d in Menu { Button("قطع اتصال") { Task { await state.manage(d, action: "1") } }; if d.isBlocked { Button("رفع مسدودی") { Task { await state.manage(d, action: "3") } } } else { Button("مسدود کردن", role: .destructive) { Task { await state.manage(d, action: "2") } } } } label: { Image(systemName: "ellipsis.circle") } } }.frame(minHeight: 420) } }.padding(30) }
+    @State private var filter = "all"
+    @State private var search = ""
+    @State private var confirmingReset = false
+
+    private var filtered: [ConnectedDevice] {
+        state.devices.filter { device in
+            let statusOK = filter == "all" || (filter == "online" && device.isOnline) || (filter == "blocked" && device.isBlocked) || (filter == "history" && !device.isOnline && !device.isBlocked)
+            let query = search.trimmingCharacters(in: .whitespaces)
+            let queryOK = query.isEmpty || device.name.localizedCaseInsensitiveContains(query) || device.ip.contains(query) || device.mac.localizedCaseInsensitiveContains(query)
+            return statusOK && queryOK
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PageHeader(title: "دستگاه‌های شبکه", subtitle: "مدیریت اتصال و دسترسی کلاینت‌های مودم")
+            HStack(spacing: 12) {
+                TextField("جستجوی نام، IP یا MAC", text: $search).textFieldStyle(ModemTextFieldStyle())
+                Picker("وضعیت", selection: $filter) {
+                    Text("همه (\(state.devices.count))").tag("all")
+                    Text("آنلاین (\(state.devices.filter(\.isOnline).count))").tag("online")
+                    Text("مسدود (\(state.devices.filter(\.isBlocked).count))").tag("blocked")
+                    Text("سابقه").tag("history")
+                }.frame(width: 230)
+                Button("صفر کردن ترافیک همه", systemImage: "arrow.counterclockwise") { confirmingReset = true }.disabled(state.devices.isEmpty)
+            }
+            SoftCard {
+                Table(filtered) {
+                    TableColumn("نام") { d in
+                        HStack(spacing: 6) {
+                            Image(systemName: d.isOnline ? "circle.fill" : d.isBlocked ? "nosign" : "circle").foregroundStyle(d.isOnline ? ModemTheme.success : d.isBlocked ? ModemTheme.danger : ModemTheme.muted).font(.caption)
+                            Text(d.name).lineLimit(1)
+                            if d.isCurrentMac { Text("این مک").font(.caption2.bold()).foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 2).background(ModemTheme.blue, in: Capsule()) }
+                        }
+                    }
+                    TableColumn("IP") { Text($0.ip).monospaced() }
+                    TableColumn("MAC") { Text($0.mac).font(.caption.monospaced()) }
+                    TableColumn("اتصال") { Text($0.connectionType).font(.caption) }
+                    TableColumn("مدت") { Text(Formatters.duration($0.durationSeconds)).font(.caption) }
+                    TableColumn("دریافت/ارسال") { Text("↓ \(Formatters.bytes($0.receivedBytes))  ↑ \(Formatters.bytes($0.sentBytes))").font(.caption) }
+                    TableColumn("") { d in
+                        Menu {
+                            Button("قطع اتصال") { Task { await state.manage(d, action: "1") } }.disabled(d.isCurrentMac)
+                            if d.isBlocked {
+                                Button("رفع مسدودی") { Task { await state.manage(d, action: "3") } }
+                            } else {
+                                Button("مسدود کردن", role: .destructive) { Task { await state.manage(d, action: "2") } }.disabled(d.isCurrentMac)
+                            }
+                        } label: { Image(systemName: "ellipsis.circle") }
+                    }
+                }.frame(minHeight: 420)
+            }
+            if state.devices.contains(where: \.isCurrentMac) {
+                Label("دستگاه «این مک» محافظت شده و از این اپ قطع یا مسدود نمی‌شود.", systemImage: "lock.shield").font(.caption).foregroundStyle(ModemTheme.muted)
+            }
+        }.padding(30)
+        .confirmationDialog("ترافیک همهٔ دستگاه‌ها صفر شود؟", isPresented: $confirmingReset) {
+            Button("صفر کردن ترافیک", role: .destructive) { Task { await state.resetTraffic() } }
+        } message: { Text("این عملیات شمارندهٔ مصرف را برای همهٔ کلاینت‌ها بازنشانی می‌کند.") }
+    }
+}
+
+struct NetworkView: View {
+    @Bindable var state: AppState
+    @State private var confirmApply = false
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                PageHeader(title: "شبکه و DNS", subtitle: "تنظیمات نام‌گذاری دامنه و محدودهٔ DHCP مودم")
+                if let info = state.dnsInfo {
+                    SoftCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("وضعیت فعلی", systemImage: "network").font(.headline).foregroundStyle(ModemTheme.blue)
+                            Grid(alignment: .leading, horizontalSpacing: 26, verticalSpacing: 8) {
+                                GridRow { Text("DNS").foregroundStyle(ModemTheme.muted); Text(info.dnsEnabled ? "\(info.dns1)\(info.dns2.isEmpty ? "" : " • \(info.dns2)")" : "خودکار (اپراتور/مودم)") }
+                                GridRow { Text("مودم").foregroundStyle(ModemTheme.muted); Text(info.ip.isEmpty ? "--" : info.ip).monospaced() }
+                                GridRow { Text("محدودهٔ DHCP").foregroundStyle(ModemTheme.muted); Text("\(info.start) – \(info.end)").monospaced() }
+                                GridRow { Text("مدت اجاره").foregroundStyle(ModemTheme.muted); Text(info.leaseTime.isEmpty ? "--" : "\(info.leaseTime)") }
+                            }.font(.callout)
+                        }
+                    }
+                } else {
+                    SoftCard { HStack { ProgressView(); Text("در حال خواندن تنظیمات شبکه…").foregroundStyle(ModemTheme.muted) }.frame(maxWidth: .infinity, minHeight: 90) }
+                }
+                SoftCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("پروفایل DNS", systemImage: "shield.lefthalf.filled").font(.headline).foregroundStyle(ModemTheme.blue)
+                        ForEach(DNSProfile.allCases) { profile in
+                            Button { state.dnsProfile = profile } label: {
+                                HStack {
+                                    Image(systemName: state.dnsProfile == profile ? "largecircle.fill.circle" : "circle").foregroundStyle(ModemTheme.blue)
+                                    VStack(alignment: .leading, spacing: 2) { Text(profile.title).fontWeight(.medium); Text(profile.detail).font(.caption).foregroundStyle(ModemTheme.muted) }
+                                    Spacer()
+                                    if !profile.primary.isEmpty { Text(profile.primary).font(.caption.monospaced()).foregroundStyle(ModemTheme.muted) }
+                                }.padding(10).background(state.dnsProfile == profile ? ModemTheme.blue.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain)
+                        }
+                        if state.dnsProfile == .custom {
+                            HStack { TextField("DNS اول", text: $state.customDNS1).textFieldStyle(ModemTextFieldStyle()); TextField("DNS دوم (اختیاری)", text: $state.customDNS2).textFieldStyle(ModemTextFieldStyle()) }
+                        }
+                        HStack { Spacer(); Button("اعمال تنظیمات DNS") { confirmApply = true }.buttonStyle(NavyButtonStyle()).disabled(state.isSending) }
+                    }
+                }
+                Label("تغییر DNS اتصال اینترنت را برای چند ثانیه قطع می‌کند. محدودهٔ DHCP دست‌نخورده می‌ماند.", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(ModemTheme.warning)
+            }.padding(30)
+        }
+        .task { if state.dnsInfo == nil { await state.loadDNS() } }
+        .confirmationDialog("تنظیمات DNS اعمال شود؟", isPresented: $confirmApply) {
+            Button("اعمال", role: .destructive) { Task { _ = await state.applyDNS() } }
+        } message: { Text("اتصال شبکه ممکن است چند لحظه قطع شود.") }
+    }
 }
 
 struct FileShareView: View {
@@ -421,7 +561,45 @@ struct FileShareView: View {
 struct SettingsView: View {
     @Bindable var state: AppState
     @State private var rebootConfirmation = false
-    var body: some View { ScrollView { VStack(alignment: .leading, spacing: 20) { PageHeader(title: "تنظیمات", subtitle: "اتصال و رفتار برنامه"); SoftCard { VStack(alignment: .leading, spacing: 15) { Label("اتصال به مودم", systemImage: "network").font(.headline).foregroundStyle(ModemTheme.blue); TextField("آدرس IP مودم", text: $state.host).textFieldStyle(ModemTextFieldStyle()); Text("آدرس پیش‌فرض 192.168.1.1 است.").font(.caption).foregroundStyle(ModemTheme.muted); Button("آزمایش اتصال") { Task { await state.refresh() } }.buttonStyle(NavyButtonStyle()) } }; SoftCard { VStack(alignment: .leading, spacing: 14) { Label("مدیریت مودم", systemImage: "wifi.router").font(.headline).foregroundStyle(ModemTheme.blue); Link("باز کردن پنل مدیریت", destination: URL(string: "http://\(state.host)")!); Button("راه‌اندازی مجدد مودم", role: .destructive) { rebootConfirmation = true } } }; SoftCard { VStack(alignment: .leading, spacing: 8) { Text("MyModem Native").font(.headline); Text("Swift 6 · SwiftUI · نسخهٔ 1.0").foregroundStyle(ModemTheme.muted); Text("نسخهٔ بومی و مستقل؛ بدون Python یا وب‌سرور.").font(.caption).foregroundStyle(ModemTheme.muted) } } }.padding(30) }.confirmationDialog("مودم راه‌اندازی مجدد شود؟", isPresented: $rebootConfirmation) { Button("راه‌اندازی مجدد", role: .destructive) { Task { await state.reboot() } } } }
+    private var panelURL: URL? { URL(string: "http://\(state.host)") }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                PageHeader(title: "تنظیمات", subtitle: "اتصال، رفتار برنامه و اطلاعات نسخه")
+                SoftCard {
+                    VStack(alignment: .leading, spacing: 15) {
+                        Label("اتصال به مودم", systemImage: "network").font(.headline).foregroundStyle(ModemTheme.blue)
+                        TextField("آدرس IP مودم", text: $state.host).textFieldStyle(ModemTextFieldStyle())
+                        Text("فقط IPv4 خصوصی LAN پذیرفته می‌شود؛ پیش‌فرض 192.168.1.1.").font(.caption).foregroundStyle(ModemTheme.muted)
+                        Button("آزمایش اتصال") { Task { await state.refresh() } }.buttonStyle(NavyButtonStyle())
+                    }
+                }
+                SoftCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("مدیریت مودم", systemImage: "wifi.router").font(.headline).foregroundStyle(ModemTheme.blue)
+                        if let panelURL { Link("باز کردن پنل مدیریت", destination: panelURL) }
+                        Button("راه‌اندازی مجدد مودم", role: .destructive) { rebootConfirmation = true }.disabled(state.rebootPhase.isBusy)
+                        HStack(spacing: 8) {
+                            if state.rebootPhase.isBusy { ProgressView().controlSize(.small) }
+                            Text(state.rebootPhase.title).font(.caption).foregroundStyle(state.rebootPhase == .timedOut ? ModemTheme.danger : ModemTheme.muted)
+                        }
+                    }
+                }
+                SoftCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("درباره", systemImage: "info.circle").font(.headline).foregroundStyle(ModemTheme.blue)
+                        LabeledContent("نسخه", value: "2.3.0")
+                        LabeledContent("پیاده‌سازی", value: "Swift 6 + SwiftUI")
+                        Text("نسخهٔ بومی، مستقل و بدون Python یا وب‌سرور. تماس سیم‌کارتی توسط این مودم پشتیبانی نمی‌شود؛ تشخیص تماس ازدست‌رفته بر پایهٔ پیامک اپراتور است.").font(.caption).foregroundStyle(ModemTheme.muted)
+                    }
+                }
+            }.padding(30)
+        }
+        .confirmationDialog("مودم راه‌اندازی مجدد شود؟", isPresented: $rebootConfirmation) {
+            Button("راه‌اندازی مجدد", role: .destructive) { Task { await state.reboot() } }
+        } message: { Text("اتصال چند دقیقه قطع می‌شود؛ برنامه تلاش می‌کند بازگشت مودم را تشخیص دهد.") }
+    }
 }
 
 struct PageHeader: View {

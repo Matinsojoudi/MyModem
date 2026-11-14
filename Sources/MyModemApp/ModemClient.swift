@@ -139,24 +139,28 @@ actor ModemClient {
         guard String(describing: result["sms_cmd_status_result"] ?? "") == "3" else { throw ModemError.modemRejected }
     }
 
-    func sendUSSD(_ rawCode: String) async throws -> String {
+    func sendUSSD(_ rawCode: String) async -> USSDState {
         var code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
         if !code.hasPrefix("*") { code = "*" + code }
         if !code.hasSuffix("#") { code += "#" }
         _ = try? await post(file: "json_ussd_set", payload: ["action": "2", "ussd_param": ""])
-        try await Task.sleep(for: .milliseconds(400))
-        _ = try await post(file: "json_ussd_set", payload: ["action": "1", "ussd_param": code])
-        for _ in 0..<6 {
-            try await Task.sleep(for: .seconds(1))
-            let response = try await get(file: "json_ussd_info")
+        try? await Task.sleep(for: .milliseconds(400))
+        do { _ = try await post(file: "json_ussd_set", payload: ["action": "1", "ussd_param": code]) }
+        catch { return .transport(error.localizedDescription) }
+        for _ in 0..<8 {
+            try? await Task.sleep(for: .seconds(1))
+            guard let response = try? await get(file: "json_ussd_info") else { continue }
             let text = codec.decode(response["ussd_str"] as? String ?? "")
-            if !text.isEmpty { return text }
-            let type = String(describing: response["ussd_type"] ?? "")
-            if type == "2" { return "نشست USSD توسط شبکه بسته شد." }
-            if type == "3" { return "نشست USSD توسط ارتباط دیگری پاسخ داده شد." }
-            if type == "4" { return "این کد توسط اپراتور پشتیبانی نمی‌شود." }
+            if !text.isEmpty { return .message(text) }
+            switch String(describing: response["ussd_type"] ?? "") {
+            case "2": return .terminated
+            case "3": return .answeredElsewhere
+            case "4": return .unsupported
+            case "0", "1": return .empty
+            default: continue
+            }
         }
-        return "زمان انتظار برای پاسخ شبکه تمام شد."
+        return .timedOut
     }
 
     func devices() async throws -> [ConnectedDevice] {
@@ -166,16 +170,55 @@ actor ModemClient {
             guard !mac.isEmpty else { return nil }
             let state = String(describing: raw["s"] ?? "0")
             let name = decodeUTF8Hex(raw["n"] as? String ?? "")
-            return ConnectedDevice(id: raw["i"] as? String ?? mac, name: name.isEmpty ? "دستگاه بی‌نام" : name, mac: mac, ip: raw["ip"] as? String ?? "--", status: state, isOnline: state == "1", isBlocked: state == "2", receivedBytes: safeCounter(raw["rx"]), sentBytes: safeCounter(raw["tx"]))
+            let ip = raw["ip"] as? String ?? "--"
+            let localIP = Self.localIPv4Address()
+            let duration = Int(String(describing: raw["tf"] ?? "0")) ?? 0
+            return ConnectedDevice(id: raw["i"] as? String ?? mac, name: name.isEmpty ? "دستگاه بی‌نام" : name, mac: mac, ip: ip, status: state, isOnline: state == "1" && !ip.isEmpty && ip != "NA", isBlocked: state == "2", isCurrentMac: ip == localIP, connectionType: String(describing: raw["ct"] ?? "Wi-Fi"), durationSeconds: duration, lastActive: String(describing: raw["ta"] ?? "--"), receivedBytes: safeCounter(raw["rx"]), sentBytes: safeCounter(raw["tx"]))
         }.sorted { ($0.isOnline ? 0 : $0.isBlocked ? 1 : 2) < ($1.isOnline ? 0 : $1.isBlocked ? 1 : 2) }
     }
 
     func manageDevice(_ device: ConnectedDevice, action: String) async throws {
+        if device.isCurrentMac, action == "1" || action == "2" { throw ModemError.currentDeviceProtection }
         let result = try await post(file: "json_device_management_set", payload: ["action": action, "mac": device.mac])
         guard result["result"] as? String == "success" else { throw ModemError.modemRejected }
     }
 
     func reboot() async throws { _ = try await get(file: "json_device_restart") }
+
+    func dhcpInfo() async throws -> DHCPInfo { DHCPInfo(json: try await get(file: "json_dhcp_info")) }
+
+    func applyDNS(_ profile: DNSProfile, primary: String, secondary: String) async throws {
+        let current = try await dhcpInfo()
+        let useCustom = profile != .off
+        let dns1 = profile == .custom ? primary.trimmingCharacters(in: .whitespaces) : profile.primary
+        let dns2 = profile == .custom ? secondary.trimmingCharacters(in: .whitespaces) : profile.secondary
+        if useCustom, !Self.isValidIPv4(dns1) { throw ModemError.invalidDNS("DNS اول معتبر نیست.") }
+        if useCustom, !dns2.isEmpty, !Self.isValidIPv4(dns2) { throw ModemError.invalidDNS("DNS دوم معتبر نیست.") }
+        let result = try await post(file: "json_lan_set", payload: [
+            "status": "1", "dns_enable": useCustom ? "1" : "0", "dns1": dns1, "dns2": dns2,
+            "start": current.start, "end": current.end, "lease_time": current.leaseTime, "ip": current.ip,
+            "redirect_enable": "0", "redirect_url": ""
+        ])
+        guard result["result"] as? String == "success" else { throw ModemError.modemRejected }
+        let verified = try await dhcpInfo()
+        guard verified.dnsEnabled == useCustom,
+              !useCustom || verified.dns1 == dns1
+        else { throw ModemError.invalidDNS("مودم تنظیمات DNS را تأیید نکرد.") }
+    }
+
+    func resetTraffic() async throws {
+        let result = try await post(file: "json_device_management_set", payload: ["action": "4"])
+        guard result["result"] as? String == "success" else { throw ModemError.modemRejected }
+    }
+
+    nonisolated static func isValidIPv4(_ value: String) -> Bool {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy { part in
+            !part.isEmpty && part.allSatisfy(\.isNumber) && (part.count == 1 || part.first != "0") && UInt8(part) != nil
+        }
+    }
+
 
     private func get(file: String) async throws -> [String: Any] { try await request(file: file, method: "get", payload: nil) }
     private func post(file: String, payload: [String: Any]) async throws -> [String: Any] { try await request(file: file, method: "post", payload: payload) }
@@ -198,6 +241,29 @@ actor ModemClient {
     }
 
     private func modemTime() -> String { let formatter = DateFormatter(); formatter.timeZone = TimeZone(identifier: "Asia/Tehran"); formatter.dateFormat = "yy,MM,dd,HH,mm,ss,+3.5"; return formatter.string(from: Date()) }
+
+    static func localIPv4Address() -> String? {
+        var pointer: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&pointer) == 0, let first = pointer else { return nil }
+        defer { freeifaddrs(pointer) }
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        var fallback: String?
+        while let current = cursor {
+            defer { cursor = current.pointee.ifa_next }
+            guard let address = current.pointee.ifa_addr, address.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let name = String(cString: current.pointee.ifa_name)
+            guard name != "lo0" else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            var mutableAddress = address.pointee
+            guard getnameinfo(&mutableAddress, socklen_t(address.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
+            let bytes = host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+            let value = String(decoding: bytes, as: UTF8.self)
+            if name == "en0" { return value }
+            fallback = fallback ?? value
+        }
+        return fallback
+    }
+
     private func splitContactHeader(_ input: String) -> (name: String, number: String) {
         let values = input.split(separator: ";", omittingEmptySubsequences: true).map { String($0).trimmingCharacters(in: .whitespaces) }
         var nameParts: [String] = []

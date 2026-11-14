@@ -1,4 +1,4 @@
-# MyModem Native 2.2.0
+# MyModem Native 2.3.0
 
 نسخهٔ بومی macOS با Swift 6 و SwiftUI. این نسخه مستقیم با API مودم ارتباط می‌گیرد و به Python، وب‌سرور یا وابستگی خارجی نیاز ندارد.
 

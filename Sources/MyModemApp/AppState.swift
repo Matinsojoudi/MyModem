@@ -10,6 +10,7 @@ final class AppState {
         case messages = "پیام‌ها"
         case ussd = "کد دستوری"
         case devices = "دستگاه‌ها"
+        case network = "شبکه و DNS"
         case fileShare = "اشتراک فایل"
         case settings = "تنظیمات"
         var id: String { rawValue }
@@ -19,6 +20,7 @@ final class AppState {
             case .messages: "message.fill"
             case .ussd: "number.square.fill"
             case .devices: "wifi.router.fill"
+            case .network: "network"
             case .fileShare: "square.and.arrow.up.fill"
             case .settings: "gearshape.fill"
             }
@@ -48,6 +50,11 @@ final class AppState {
     var ussdCode = "*100#"
     var ussdResponse = ""
     var isSending = false
+    var dnsInfo: DHCPInfo?
+    var dnsProfile: DNSProfile = .off
+    var customDNS1 = ""
+    var customDNS2 = ""
+    var rebootPhase: RebootPhase = .idle
     let fileShare = FileShareServer()
 
     private let client: ModemClient
@@ -238,8 +245,15 @@ final class AppState {
     func sendUSSD() async {
         isSending = true
         defer { isSending = false }
-        do { ussdResponse = try await client.sendUSSD(ussdCode); errorMessage = nil }
-        catch { errorMessage = error.localizedDescription }
+        switch await client.sendUSSD(ussdCode) {
+        case .message(let text): ussdResponse = text; errorMessage = nil
+        case .terminated: ussdResponse = "نشست USSD را شبکه بست. مودم‌های دیتا معمولاً کانال صوتی/سیگنالینگ کامل برای USSD ندارند؛ از پنل اپراتور استفاده کنید."
+        case .answeredElsewhere: ussdResponse = "نشست USSD توسط ارتباط دیگری پاسخ داده شد."
+        case .unsupported: ussdResponse = "این کد دستوری توسط اپراتور پشتیبانی نمی‌شود."
+        case .empty: ussdResponse = "درخواست ارسال شد اما اپراتور متنی برنگرداند."
+        case .timedOut: ussdResponse = "زمان انتظار برای پاسخ شبکه تمام شد."
+        case .transport(let message): ussdResponse = ""; errorMessage = message
+        }
     }
 
     func manage(_ device: ConnectedDevice, action: String) async {
@@ -247,9 +261,45 @@ final class AppState {
         catch { errorMessage = error.localizedDescription }
     }
 
-    func reboot() async {
-        do { try await client.reboot(); errorMessage = nil }
+    func resetTraffic() async {
+        do { try await client.resetTraffic(); await refresh() }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    func loadDNS() async {
+        do {
+            dnsInfo = try await client.dhcpInfo()
+            if !dnsInfo!.dnsEnabled { dnsProfile = .off }
+            else if dnsInfo!.dns1 == DNSProfile.cloudflareFamily.primary { dnsProfile = .cloudflareFamily }
+            else if dnsInfo!.dns1 == DNSProfile.adguardFamily.primary { dnsProfile = .adguardFamily }
+            else { dnsProfile = .custom; customDNS1 = dnsInfo!.dns1; customDNS2 = dnsInfo!.dns2 }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func applyDNS() async -> Bool {
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await client.applyDNS(dnsProfile, primary: customDNS1, secondary: customDNS2)
+            await loadDNS()
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func reboot() async {
+        rebootPhase = .sending
+        do {
+            try await client.reboot()
+            rebootPhase = .waitingForOffline
+            var sawOffline = false
+            for _ in 0..<40 {
+                try? await Task.sleep(for: .seconds(2))
+                if (try? await client.status()) != nil {
+                    if sawOffline { rebootPhase = .online; await refresh(); return }
+                } else { sawOffline = true; rebootPhase = .reconnecting }
+            }
+            rebootPhase = sawOffline ? .timedOut : .online
+        } catch { rebootPhase = .idle; errorMessage = error.localizedDescription }
     }
 
     private func requestNotifications() {
