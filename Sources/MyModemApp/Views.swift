@@ -147,6 +147,7 @@ struct MessagesView: View {
     @State private var showingAddContact = false
     @State private var editingRecord: ContactRecord?
     @State private var deletingContact: ModemContact?
+    @State private var importSummary: String?
 
     private var filteredContacts: [ModemContact] {
         let query = contactSearch.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -229,8 +230,21 @@ struct MessagesView: View {
                     Text("سیم‌کارت (\(state.contacts.filter(\.hasSIMRecord).count))").tag(ContactStorage?.some(.sim))
                     Text("مودم (\(state.contacts.filter(\.hasModemRecord).count))").tag(ContactStorage?.some(.modem))
                 }.frame(width: 190)
-                Button("افزودن مخاطب", systemImage: "person.badge.plus") { showingAddContact = true }.buttonStyle(NavyButtonStyle())
+                Menu {
+                    Button("افزودن مخاطب") { showingAddContact = true }
+                    Divider()
+                    Button("درون‌ریزی از vCard/CSV…") {
+                        Task {
+                            let result = await state.importContacts(storage: .modem)
+                            importSummary = "افزوده: \(result.added) • ردشده: \(result.skipped)"
+                        }
+                    }
+                    Button("برون‌بری vCard") { state.exportContacts(format: .vcard) }
+                    Button("برون‌بری CSV") { state.exportContacts(format: .csv) }
+                } label: { Label("مدیریت مخاطبین", systemImage: "person.badge.plus") }
+                .buttonStyle(NavyButtonStyle())
             }
+            if let importSummary { Text(importSummary).font(.caption).foregroundStyle(ModemTheme.success) }
             if filteredContacts.isEmpty {
                 SoftCard { ContentUnavailableView(state.contacts.isEmpty ? "مخاطبی روی مودم نیست" : "مخاطبی پیدا نشد", systemImage: "person.crop.circle.badge.questionmark", description: Text(state.contacts.isEmpty ? "مخاطبین سیم‌کارت و حافظهٔ مودم اینجا نمایش داده می‌شوند." : "عبارت جستجو را تغییر دهید.")) }.frame(maxHeight: .infinity)
             } else {
@@ -616,7 +630,7 @@ struct SettingsView: View {
                 SoftCard {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("درباره", systemImage: "info.circle").font(.headline).foregroundStyle(ModemTheme.blue)
-                        LabeledContent("نسخه", value: "2.7.0")
+                        LabeledContent("نسخه", value: "2.8.0")
                         LabeledContent("پیاده‌سازی", value: "Swift 6 + SwiftUI")
                         Text("نسخهٔ بومی، مستقل و بدون Python یا وب‌سرور. تماس سیم‌کارتی توسط این مودم پشتیبانی نمی‌شود؛ تشخیص تماس ازدست‌رفته بر پایهٔ پیامک اپراتور است.").font(.caption).foregroundStyle(ModemTheme.muted)
                     }

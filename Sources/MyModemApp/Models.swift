@@ -34,6 +34,8 @@ struct ModemStatus: Sendable {
     }
 }
 
+enum ContactExportFormat: Sendable { case vcard, csv }
+
 enum MessageDirection: String, Sendable, Hashable { case incoming, outgoing }
 
 struct SMSMessage: Identifiable, Sendable, Hashable {

@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import UniformTypeIdentifiers
 import UserNotifications
 
 @MainActor
@@ -192,6 +193,33 @@ final class AppState {
             contactsFreshness = .fresh(Date())
             return true
         } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func exportContacts(format: ContactExportFormat) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = format == .vcard ? "mymodem-contacts.vcf" : "mymodem-contacts.csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let content = format == .vcard ? ContactCodec.vCard(contacts) : ContactCodec.csv(contacts)
+        try? Data(content.utf8).write(to: url, options: .atomic)
+    }
+
+    func importContacts(storage: ContactStorage) async -> (added: Int, skipped: Int) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.commaSeparatedText, .vCard, .plainText]
+        guard panel.runModal() == .OK, let url = panel.url,
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return (0, 0) }
+        let parsed = ContactCodec.parse(text)
+        let existing = Set(contacts.map(\.normalizedNumber))
+        let codec = ModemCodec()
+        var added = 0, skipped = 0
+        for entry in parsed {
+            let normalized = codec.normalizePhone(entry.number)
+            guard !normalized.isEmpty, !existing.contains(normalized) else { skipped += 1; continue }
+            if await addContact(name: entry.name, number: entry.number, group: entry.group, storage: storage) { added += 1 }
+            else { skipped += 1 }
+        }
+        return (added, skipped)
     }
 
     func compose(to contact: ModemContact) {
