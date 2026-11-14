@@ -33,7 +33,7 @@ actor ModemClient {
                 let text = codec.decode(raw["subject"] as? String ?? "")
                 let rawTime = raw["received"] as? String ?? ""
                 let missed = text.localizedCaseInsensitiveContains("missed call") || text.contains("تماس از دست رفته") || text.contains("تماس ازدست رفته")
-                return SMSMessage(id: id, sender: sender, senderName: "", text: text, rawTime: rawTime, displayTime: dateFormatter.string(fromModemTimestamp: rawTime), isUnread: String(describing: raw["status"] ?? "1") == "0", isMissedCall: missed, callerNumber: extractPhone(text), storage: id.contains("SRCV") ? "سیم‌کارت" : "دستگاه")
+                return SMSMessage(id: id, sender: sender, senderName: "", text: text, rawTime: rawTime, displayTime: dateFormatter.string(fromModemTimestamp: rawTime), isUnread: String(describing: raw["status"] ?? "1") == "0", isMissedCall: missed, callerNumber: extractPhone(text), storage: id.contains("SRCV") ? "سیم‌کارت" : "دستگاه", direction: .incoming)
             }
             .sorted { $0.rawTime > $1.rawTime }
     }
@@ -43,9 +43,7 @@ actor ModemClient {
             "pb_action": "pb_get_all", "location": "2", "page_num": "1", "data_per_page": "100"
         ])
         let entries = response["pb_entries"] as? [[String: Any]] ?? []
-        var contactsByNumber: [String: ModemContact] = [:]
-        var contactsWithoutNumber: [ModemContact] = []
-
+        var records: [ContactRecord] = []
         for entry in entries {
             guard let identifier = entry["pbm_id"] as? String, !identifier.isEmpty else { continue }
             let decoded = codec.decode(entry["pbm_name"] as? String ?? "")
@@ -54,23 +52,60 @@ actor ModemClient {
             let number = rawNumber.isEmpty ? parts.number : rawNumber
             let normalized = codec.normalizePhone(number)
             let name = parts.name.isEmpty ? (decoded.isEmpty ? "بی‌نام" : decoded.replacingOccurrences(of: ";", with: " ").trimmingCharacters(in: .whitespaces)) : parts.name
-            let location = String(describing: entry["pbm_location"] ?? "1")
-            let groupCode = entry["pbm_group"] as? String ?? "common"
-            let group = ["common": "عمومی", "family": "خانواده", "friend": "دوستان", "colleague": "همکاران"][groupCode] ?? groupCode
-            let contact = ModemContact(id: identifier, allIDs: [identifier], name: name.isEmpty ? "بی‌نام" : name, number: number, normalizedNumber: normalized, group: group, storage: location == "0" ? "سیم‌کارت" : "دستگاه")
-
-            guard !normalized.isEmpty else { contactsWithoutNumber.append(contact); continue }
-            if let existing = contactsByNumber[normalized] {
-                let preferred = existing.name == "بی‌نام" || contact.name.count > existing.name.count ? contact : existing
-                contactsByNumber[normalized] = ModemContact(id: preferred.id, allIDs: Array(Set(existing.allIDs + contact.allIDs)).sorted(), name: preferred.name, number: preferred.number, normalizedNumber: normalized, group: preferred.group, storage: preferred.storage)
-            } else {
-                contactsByNumber[normalized] = contact
-            }
+            let storage = ContactStorage(rawValue: String(describing: entry["pbm_location"] ?? "1")) ?? .modem
+            let group = ContactGroup(rawValue: entry["pbm_group"] as? String ?? "common") ?? .common
+            records.append(.init(id: identifier, name: name.isEmpty ? "بی‌نام" : name, number: number, normalizedNumber: normalized, group: group, storage: storage))
         }
 
-        return (Array(contactsByNumber.values) + contactsWithoutNumber).sorted {
-            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        let grouped = Dictionary(grouping: records) { record in
+            record.normalizedNumber.isEmpty ? "id:\(record.id)" : record.normalizedNumber
         }
+        return grouped.values.map { records in
+            let preferred = records.max { left, right in
+                let leftScore = left.name == "بی‌نام" ? 0 : left.name.count
+                let rightScore = right.name == "بی‌نام" ? 0 : right.name.count
+                return leftScore < rightScore
+            } ?? records[0]
+            return ModemContact(normalizedNumber: preferred.normalizedNumber, preferredName: preferred.name, records: records.sorted { $0.storage.rawValue < $1.storage.rawValue })
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func sentMessages() async throws -> [SMSMessage] {
+        let response = try await post(file: "json_message_set", payload: ["message_flag": "GET_SENT_SMS_LOCAL", "page_number": 1, "data_per_page": "50"])
+        return (response["message_list"] as? [[String: Any]] ?? []).compactMap { raw in
+            let id = raw["index"] as? String ?? ""
+            guard !id.isEmpty else { return nil }
+            let header = codec.decode(raw["from"] as? String ?? "").trimmingCharacters(in: CharacterSet(charactersIn: ";"))
+            let parts = splitContactHeader(header)
+            let recipient = parts.number.isEmpty ? header : parts.number
+            let text = codec.decode(raw["subject"] as? String ?? "")
+            let rawTime = raw["received"] as? String ?? ""
+            return SMSMessage(id: id, sender: recipient, senderName: parts.name, text: text, rawTime: rawTime, displayTime: dateFormatter.string(fromModemTimestamp: rawTime), isUnread: false, isMissedCall: false, callerNumber: "", storage: "دستگاه", direction: .outgoing)
+        }.sorted { $0.rawTime > $1.rawTime }
+    }
+
+    func addContact(name: String, number: String, group: ContactGroup, storage: ContactStorage) async throws {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanNumber = codec.normalizePhone(number)
+        guard !cleanName.isEmpty, !cleanNumber.isEmpty else { throw ModemError.modemRejected }
+        let isUnicode = cleanName.unicodeScalars.contains { !$0.isASCII }
+        let maxLength = storage == .sim ? (isUnicode ? 14 : 20) : 30
+        guard cleanName.count <= maxLength else { throw ModemError.contactNameTooLong(maxLength) }
+        let result = try await post(file: "json_pb_set", payload: [
+            "pb_action": "pbm_contact_add", "location": storage.rawValue,
+            "name": codec.encode(cleanName), "mobile": cleanNumber, "group": group.rawValue
+        ])
+        guard String(describing: result["pb_result"] ?? "") == "0" else { throw ModemError.modemRejected }
+    }
+
+    func deleteContactRecords(ids: [String]) async throws {
+        let cleanIDs = ids.filter { !$0.isEmpty }
+        guard !cleanIDs.isEmpty else { throw ModemError.modemRejected }
+        let result = try await post(file: "json_pb_set", payload: [
+            "pb_action": "pbm_contact_delete", "location": "2", "delete_option": "delete_num",
+            "delete_pb_id": cleanIDs.map { $0.hasSuffix(",") ? $0 : $0 + "," }.joined()
+        ])
+        guard String(describing: result["pb_result"] ?? "") == "0" else { throw ModemError.modemRejected }
     }
 
     func sendSMS(to phone: String, text: String) async throws {
@@ -88,6 +123,14 @@ actor ModemClient {
         let isSIM = message.id.contains("SRCV")
         let result = try await post(file: "json_message_set", payload: ["message_flag": "SET_MSG_READ", "sms_cmd": "7", "tags": isSIM ? "" : "12", "mem_store": isSIM ? "0" : "1", "read_message_id": message.id.hasSuffix(",") ? message.id : message.id + ","])
         guard String(describing: result["sms_cmd_status_result"] ?? "") == "3" else { throw ModemError.modemRejected }
+    }
+
+    func markRead(_ messages: [SMSMessage]) async -> Int {
+        var count = 0
+        for message in messages where message.direction == .incoming && message.isUnread {
+            if (try? await markRead(message)) != nil { count += 1 }
+        }
+        return count
     }
 
     func delete(_ message: SMSMessage) async throws {

@@ -28,6 +28,8 @@ final class AppState {
     var selection: Section = .dashboard
     var status: ModemStatus?
     var messages: [SMSMessage] = []
+    var sentMessages: [SMSMessage] = []
+    var conversations: [Conversation] = []
     var contacts: [ModemContact] = []
     var devices: [ConnectedDevice] = []
     var isRefreshing = false
@@ -103,9 +105,10 @@ final class AppState {
 
         async let statusResult = capture { try await self.client.status() }
         async let messagesResult = capture { try await self.client.messages() }
+        async let sentResult = capture { try await self.client.sentMessages() }
         async let contactsResult = capture { try await self.client.contacts() }
         async let devicesResult = capture { try await self.client.devices() }
-        let (nextStatus, nextMessages, nextContacts, nextDevices) = await (statusResult, messagesResult, contactsResult, devicesResult)
+        let (nextStatus, nextMessages, nextSent, nextContacts, nextDevices) = await (statusResult, messagesResult, sentResult, contactsResult, devicesResult)
         let now = Date()
 
         switch nextStatus {
@@ -120,6 +123,8 @@ final class AppState {
         case .success(let value): messages = resolvedMessages(value, contacts: contacts); messagesFreshness = .fresh(now); notifyAboutNewMessages(value)
         case .failure(let error): messagesFreshness = fail(previous: messagesFreshness, message: error.localizedDescription)
         }
+        if case .success(let value) = nextSent { sentMessages = resolvedMessages(value, contacts: contacts) }
+        conversations = buildConversations(incoming: messages, outgoing: sentMessages, contacts: contacts)
         switch nextDevices {
         case .success(let value): devices = value; devicesFreshness = .fresh(now)
         case .failure(let error): devicesFreshness = fail(previous: devicesFreshness, message: error.localizedDescription)
@@ -141,6 +146,41 @@ final class AppState {
         }
     }
 
+    func addContact(name: String, number: String, group: ContactGroup, storage: ContactStorage) async -> Bool {
+        do {
+            try await client.addContact(name: name, number: number, group: group, storage: storage)
+            contacts = try await client.contacts()
+            contactsFreshness = .fresh(Date())
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func replaceContact(_ oldRecord: ContactRecord, name: String, number: String, group: ContactGroup, storage: ContactStorage) async -> Bool {
+        do {
+            try await client.addContact(name: name, number: number, group: group, storage: storage)
+            let afterAdd = try await client.contacts()
+            let normalized = ModemCodec().normalizePhone(number)
+            guard afterAdd.contains(where: { contact in contact.normalizedNumber == normalized && contact.records.contains { $0.storage == storage } }) else {
+                errorMessage = "مخاطب جدید روی مودم تأیید نشد؛ نسخهٔ قبلی حذف نشد."
+                return false
+            }
+            try await client.deleteContactRecords(ids: [oldRecord.id])
+            contacts = try await client.contacts()
+            contactsFreshness = .fresh(Date())
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
+    func deleteContact(_ contact: ModemContact, storage: ContactStorage? = nil) async -> Bool {
+        let ids = contact.records.filter { storage == nil || $0.storage == storage }.map(\.id)
+        do {
+            try await client.deleteContactRecords(ids: ids)
+            contacts = try await client.contacts()
+            contactsFreshness = .fresh(Date())
+            return true
+        } catch { errorMessage = error.localizedDescription; return false }
+    }
+
     func compose(to contact: ModemContact) {
         recipient = contact.number
     }
@@ -153,8 +193,19 @@ final class AppState {
         return messages.map { message in
             let normalized = codec.normalizePhone(message.sender)
             let matchedName = names[normalized] ?? message.senderName
-            return SMSMessage(id: message.id, sender: message.sender, senderName: matchedName, text: message.text, rawTime: message.rawTime, displayTime: message.displayTime, isUnread: message.isUnread, isMissedCall: message.isMissedCall, callerNumber: message.callerNumber, storage: message.storage)
+            return SMSMessage(id: message.id, sender: message.sender, senderName: matchedName, text: message.text, rawTime: message.rawTime, displayTime: message.displayTime, isUnread: message.isUnread, isMissedCall: message.isMissedCall, callerNumber: message.callerNumber, storage: message.storage, direction: message.direction)
         }
+    }
+
+    private func buildConversations(incoming: [SMSMessage], outgoing: [SMSMessage], contacts: [ModemContact]) -> [Conversation] {
+        let codec = ModemCodec()
+        let names = Dictionary(uniqueKeysWithValues: contacts.compactMap { $0.normalizedNumber.isEmpty ? nil : ($0.normalizedNumber, $0.name) })
+        let grouped = Dictionary(grouping: incoming + outgoing) { message in codec.normalizePhone(message.sender) }
+        return grouped.compactMap { peer, messages in
+            guard !peer.isEmpty else { return nil }
+            let sorted = messages.sorted { $0.rawTime < $1.rawTime }
+            return Conversation(peerNumber: peer, displayName: names[peer] ?? sorted.first?.displaySender ?? peer, messages: sorted)
+        }.sorted { ($0.lastMessage?.rawTime ?? "") > ($1.lastMessage?.rawTime ?? "") }
     }
 
     func sendMessage() async {
@@ -171,6 +222,12 @@ final class AppState {
     func markRead(_ message: SMSMessage) async {
         do { try await client.markRead(message); await refresh() }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    func markConversationRead(_ conversation: Conversation) async {
+        let count = await client.markRead(conversation.messages)
+        guard count > 0 else { return }
+        await refresh()
     }
 
     func delete(_ message: SMSMessage) async {

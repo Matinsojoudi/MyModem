@@ -134,16 +134,24 @@ struct TrafficCard: View {
 }
 
 struct MessagesView: View {
-    enum Mode: String, CaseIterable, Identifiable { case inbox = "پیام‌ها"; case contacts = "مخاطبین"; var id: String { rawValue } }
+    enum Mode: String, CaseIterable, Identifiable { case conversations = "گفتگوها"; case inbox = "صندوق‌ها"; case contacts = "مخاطبین"; var id: String { rawValue } }
     @Bindable var state: AppState
     @State private var selected: SMSMessage?
-    @State private var mode: Mode = .inbox
+    @State private var mode: Mode = .conversations
+    @State private var selectedConversation: Conversation?
     @State private var contactSearch = ""
+    @State private var contactStorageFilter: ContactStorage?
+    @State private var showingAddContact = false
+    @State private var editingRecord: ContactRecord?
+    @State private var deletingContact: ModemContact?
 
     private var filteredContacts: [ModemContact] {
         let query = contactSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return state.contacts }
-        return state.contacts.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.number.localizedCaseInsensitiveContains(query) }
+        return state.contacts.filter { contact in
+            let matchesStorage = contactStorageFilter == nil || contact.records.contains { $0.storage == contactStorageFilter }
+            let matchesQuery = query.isEmpty || contact.name.localizedCaseInsensitiveContains(query) || contact.records.contains { $0.number.localizedCaseInsensitiveContains(query) }
+            return matchesStorage && matchesQuery
+        }
     }
 
     var body: some View {
@@ -154,13 +162,43 @@ struct MessagesView: View {
                 Picker("نمایش", selection: $mode) { ForEach(Mode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).frame(width: 230)
             }.padding(30).padding(.bottom, 0)
             Group {
-                if mode == .inbox {
-                    inbox
-                } else {
-                    contacts
+                switch mode {
+                case .conversations: conversationView
+                case .inbox: inbox
+                case .contacts: contacts
                 }
             }.transition(.opacity)
-        }.animation(.easeOut(duration: 0.15), value: mode)
+        }
+        .animation(.easeOut(duration: 0.15), value: mode)
+        .sheet(isPresented: $showingAddContact) { ContactEditorView(state: state) }
+        .sheet(item: $editingRecord) { record in ContactEditorView(state: state, editing: record) }
+        .confirmationDialog("کدام نسخهٔ مخاطب حذف شود؟", isPresented: Binding(get: { deletingContact != nil }, set: { if !$0 { deletingContact = nil } }), presenting: deletingContact) { contact in
+            if contact.hasSIMRecord { Button("حذف از سیم‌کارت", role: .destructive) { Task { _ = await state.deleteContact(contact, storage: .sim); deletingContact = nil } } }
+            if contact.hasModemRecord { Button("حذف از حافظه مودم", role: .destructive) { Task { _ = await state.deleteContact(contact, storage: .modem); deletingContact = nil } } }
+            if contact.records.count > 1 { Button("حذف همه نسخه‌ها", role: .destructive) { Task { _ = await state.deleteContact(contact); deletingContact = nil } } }
+        } message: { contact in Text("«\(contact.name)» ممکن است در چند حافظه ذخیره شده باشد.") }
+    }
+
+    private var conversationView: some View {
+        HSplitView {
+            List(state.conversations, selection: $selectedConversation) { conversation in
+                HStack(spacing: 11) {
+                    ZStack { Circle().fill(ModemTheme.blue.opacity(0.12)); Text(String(conversation.displayName.prefix(2))).font(.caption.bold()).foregroundStyle(ModemTheme.navy) }.frame(width: 38, height: 38)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack { Text(conversation.displayName).fontWeight(conversation.unreadCount > 0 ? .bold : .medium); Spacer(); if conversation.unreadCount > 0 { Text("\(conversation.unreadCount)").font(.caption2.bold()).foregroundStyle(.white).padding(5).background(ModemTheme.blue, in: Circle()) } }
+                        Text(conversation.lastMessage?.text ?? "").lineLimit(1).font(.callout).foregroundStyle(ModemTheme.muted)
+                        Text(conversation.lastMessage?.displayTime ?? "").font(.caption2).foregroundStyle(ModemTheme.muted)
+                    }
+                }.padding(.vertical, 6).tag(conversation)
+            }.scrollContentBackground(.hidden).frame(minWidth: 330)
+            if let conversation = selectedConversation {
+                VStack(spacing: 0) {
+                    HStack { VStack(alignment: .leading) { Text(conversation.displayName).font(.title3.bold()); Text(conversation.peerNumber).font(.caption).foregroundStyle(ModemTheme.muted) }; Spacer(); if conversation.unreadCount > 0 { Button("خواندن همه") { Task { await state.markConversationRead(conversation) } } } }.padding(18).background(ModemTheme.surface)
+                    ScrollViewReader { proxy in ScrollView { LazyVStack(spacing: 9) { ForEach(conversation.messages) { message in MessageBubble(message: message).id(message.id) } }.padding(18) }.onAppear { if let id = conversation.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) } } }
+                    HStack { TextField("پیام بنویسید…", text: $state.draft).textFieldStyle(ModemTextFieldStyle()); Button("ارسال") { state.recipient = conversation.peerNumber; Task { await state.sendMessage() } }.buttonStyle(NavyButtonStyle()).disabled(state.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.isSending) }.padding(14).background(ModemTheme.surface)
+                }
+            } else { ContentUnavailableView("یک گفتگو را انتخاب کنید", systemImage: "bubble.left.and.bubble.right") }
+        }.padding(30).padding(.top, 10)
     }
 
     private var inbox: some View {
@@ -180,13 +218,22 @@ struct MessagesView: View {
 
     private var contacts: some View {
         VStack(spacing: 16) {
-            HStack { Image(systemName: "magnifyingglass").foregroundStyle(ModemTheme.muted); TextField("جستجو در نام یا شماره", text: $contactSearch).textFieldStyle(ModemTextFieldStyle()); Text("\(filteredContacts.count) مخاطب").font(.caption).foregroundStyle(ModemTheme.muted) }
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(ModemTheme.muted)
+                TextField("جستجو در نام یا شماره", text: $contactSearch).textFieldStyle(ModemTextFieldStyle())
+                Picker("حافظه", selection: $contactStorageFilter) {
+                    Text("همه (\(state.contacts.count))").tag(ContactStorage?.none)
+                    Text("سیم‌کارت (\(state.contacts.filter(\.hasSIMRecord).count))").tag(ContactStorage?.some(.sim))
+                    Text("مودم (\(state.contacts.filter(\.hasModemRecord).count))").tag(ContactStorage?.some(.modem))
+                }.frame(width: 190)
+                Button("افزودن مخاطب", systemImage: "person.badge.plus") { showingAddContact = true }.buttonStyle(NavyButtonStyle())
+            }
             if filteredContacts.isEmpty {
                 SoftCard { ContentUnavailableView(state.contacts.isEmpty ? "مخاطبی روی مودم نیست" : "مخاطبی پیدا نشد", systemImage: "person.crop.circle.badge.questionmark", description: Text(state.contacts.isEmpty ? "مخاطبین سیم‌کارت و حافظهٔ مودم اینجا نمایش داده می‌شوند." : "عبارت جستجو را تغییر دهید.")) }.frame(maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], spacing: 14) {
-                        ForEach(filteredContacts) { contact in ContactCard(contact: contact) { state.compose(to: contact); mode = .inbox } }
+                        ForEach(filteredContacts) { contact in ContactCard(contact: contact, compose: { state.compose(to: contact); mode = .conversations }, edit: { editingRecord = contact.records.first }, delete: { deletingContact = contact }) }
                     }.padding(.vertical, 2)
                 }
             }
@@ -194,9 +241,29 @@ struct MessagesView: View {
     }
 }
 
+struct MessageBubble: View {
+    let message: SMSMessage
+    var body: some View {
+        HStack {
+            if message.direction == .incoming { Spacer(minLength: 80) }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(message.text).textSelection(.enabled)
+                HStack(spacing: 6) { Text(message.displayTime); Text(message.direction == .outgoing ? "ارسال‌شده" : message.storage) }.font(.caption2).foregroundStyle(message.direction == .outgoing ? Color.white.opacity(0.75) : ModemTheme.muted)
+            }
+            .foregroundStyle(message.direction == .outgoing ? Color.white : ModemTheme.ink)
+            .padding(.horizontal, 13).padding(.vertical, 10)
+            .background(message.direction == .outgoing ? ModemTheme.blue : ModemTheme.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            .overlay { if message.direction == .incoming { RoundedRectangle(cornerRadius: 15).stroke(ModemTheme.line) } }
+            if message.direction == .outgoing { Spacer(minLength: 80) }
+        }
+    }
+}
+
 struct ContactCard: View {
     let contact: ModemContact
     let compose: () -> Void
+    let edit: () -> Void
+    let delete: () -> Void
     var body: some View {
         SoftCard {
             HStack(spacing: 14) {
@@ -210,11 +277,53 @@ struct ContactCard: View {
                     HStack(spacing: 5) { Text(contact.group); Text("•"); Text(contact.storage) }.font(.caption2).foregroundStyle(ModemTheme.muted)
                 }
                 Spacer()
-                Button(action: compose) { Image(systemName: "message.fill").frame(width: 30, height: 30) }
-                    .buttonStyle(.borderedProminent).tint(ModemTheme.blue).disabled(contact.number.isEmpty)
-                    .help("ارسال پیام به \(contact.name)")
+                VStack(spacing: 6) {
+                    Button(action: compose) { Image(systemName: "message.fill").frame(width: 24, height: 24) }
+                        .buttonStyle(.borderedProminent).tint(ModemTheme.blue).disabled(contact.number.isEmpty)
+                        .help("ارسال پیام به \(contact.name)")
+                    HStack(spacing: 5) {
+                        Button(action: edit) { Image(systemName: "pencil").frame(width: 20, height: 20) }.buttonStyle(.borderless).foregroundStyle(ModemTheme.blue).help("ویرایش یا انتقال")
+                        Button(action: delete) { Image(systemName: "trash").frame(width: 20, height: 20) }.buttonStyle(.borderless).foregroundStyle(ModemTheme.danger).help("حذف مخاطب")
+                    }
+                }
             }
         }
+    }
+}
+
+struct ContactEditorView: View {
+    let state: AppState
+    let editing: ContactRecord?
+    init(state: AppState, editing: ContactRecord? = nil) {
+        self.state = state
+        self.editing = editing
+        _name = State(initialValue: editing?.name ?? "")
+        _number = State(initialValue: editing?.number ?? "")
+        _group = State(initialValue: editing?.group ?? .common)
+        _storage = State(initialValue: editing?.storage ?? .modem)
+    }
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var number = ""
+    @State private var group: ContactGroup = .common
+    @State private var storage: ContactStorage = .modem
+    @State private var saving = false
+
+    private var isUnicode: Bool { name.unicodeScalars.contains { !$0.isASCII } }
+    private var limit: Int { storage == .sim ? (isUnicode ? 14 : 20) : 30 }
+    private var canSave: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name.count <= limit && !saving }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack { VStack(alignment: .leading) { Text(editing == nil ? "افزودن مخاطب" : "ویرایش مخاطب").font(.title2.bold()); Text(editing == nil ? "محل ذخیره را خودتان انتخاب کنید." : "نسخهٔ جدید ابتدا ذخیره و تأیید میشود؛ سپس نسخهٔ قبلی حذف میگردد.").foregroundStyle(ModemTheme.muted) }; Spacer(); Button("بستن") { dismiss() } }
+            TextField("نام و نام خانوادگی", text: $name).textFieldStyle(ModemTextFieldStyle())
+            HStack { Text("\(name.count) از \(limit) کاراکتر").font(.caption).foregroundStyle(name.count > limit ? ModemTheme.danger : ModemTheme.muted); Spacer(); Text(storage.title).font(.caption.bold()).foregroundStyle(ModemTheme.blue) }
+            TextField("شماره موبایل", text: $number).textFieldStyle(ModemTextFieldStyle())
+            Picker("گروه", selection: $group) { ForEach(ContactGroup.allCases) { Text($0.title).tag($0) } }
+            Picker("محل ذخیره", selection: $storage) { ForEach(ContactStorage.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+            if storage == .sim { Label(isUnicode ? "نام فارسی روی سیم‌کارت حداکثر ۱۴ کاراکتر است." : "نام ASCII روی سیم‌کارت حداکثر ۲۰ کاراکتر است.", systemImage: "simcard").font(.caption).foregroundStyle(ModemTheme.muted) }
+            HStack { Spacer(); Button(saving ? "در حال ذخیره…" : (editing == nil ? "ذخیره مخاطب" : "ذخیره تغییرات")) { saving = true; Task { let success: Bool; if let editing { success = await state.replaceContact(editing, name: name, number: number, group: group, storage: storage) } else { success = await state.addContact(name: name, number: number, group: group, storage: storage) }; saving = false; if success { dismiss() } } }.buttonStyle(NavyButtonStyle()).disabled(!canSave) }
+        }.padding(26).frame(width: 470)
     }
 }
 
