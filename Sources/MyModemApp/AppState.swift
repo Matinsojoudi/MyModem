@@ -61,6 +61,7 @@ final class AppState {
     var rebootPhase: RebootPhase = .idle
     let fileShare = FileShareServer()
     let lanHub = LANHub()
+    let preferences = AppPreferences()
 
     private let client: ModemClient
     private var refreshTask: Task<Void, Never>?
@@ -82,11 +83,11 @@ final class AppState {
 
     func start() {
         guard refreshTask == nil else { return }
-        requestNotifications()
+        if preferences.notificationsEnabled { requestNotifications() }
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(for: .seconds(self?.preferences.refreshSeconds ?? 30))
             }
         }
     }
@@ -312,6 +313,7 @@ final class AppState {
     }
 
     private func evaluateBatteryAlerts(_ value: ModemStatus) {
+        guard preferences.batteryAlertsEnabled else { return }
         if value.isCharging || value.batteryPercent > 15 {
             alertedLowBattery = false
             alertedCriticalBattery = false
@@ -336,6 +338,7 @@ final class AppState {
     }
 
     private func notifyAboutNewMessages(_ loaded: [SMSMessage]) {
+        guard preferences.notificationsEnabled else { return }
         let current = Set(loaded.map(\.id))
         defer {
             previouslySeen.formUnion(current)

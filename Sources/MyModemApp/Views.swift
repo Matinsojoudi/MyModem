@@ -17,7 +17,7 @@ struct RootView: View {
                     case .fileShare: FileShareView(server: state.fileShare)
                     case .transfer: TransferView(hub: state.lanHub)
                     case .chat: ChatView(hub: state.lanHub)
-                    case .settings: SettingsView(state: state)
+                    case .settings: SettingsView(state: state, preferences: state.preferences)
                     }
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.992)))
@@ -562,6 +562,7 @@ struct FileShareView: View {
 
 struct SettingsView: View {
     @Bindable var state: AppState
+    @Bindable var preferences: AppPreferences
     @State private var rebootConfirmation = false
     private var panelURL: URL? { URL(string: "http://\(state.host)") }
 
@@ -589,9 +590,33 @@ struct SettingsView: View {
                     }
                 }
                 SoftCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("رفتار برنامه", systemImage: "slider.horizontal.3").font(.headline).foregroundStyle(ModemTheme.blue)
+                        Picker("فاصلهٔ بروزرسانی", selection: $preferences.refreshSeconds) {
+                            Text("۱۵ ثانیه").tag(15); Text("۳۰ ثانیه").tag(30); Text("۶۰ ثانیه").tag(60); Text("۵ دقیقه").tag(300)
+                        }
+                        Toggle("اعلان پیام جدید", isOn: $preferences.notificationsEnabled)
+                        Toggle("هشدار باتری کم و بحرانی", isOn: $preferences.batteryAlertsEnabled)
+                        Toggle("اجرای خودکار هنگام ورود", isOn: Binding(get: { preferences.launchAtLogin }, set: { preferences.setLaunchAtLogin($0) }))
+                        if let error = preferences.launchErrorMessage { Text(error).font(.caption).foregroundStyle(ModemTheme.danger) }
+                        HStack {
+                            Picker("نگه‌داری تاریخچه", selection: $preferences.retentionDays) {
+                                Text("۱ روز").tag(1); Text("۷ روز").tag(7); Text("۳۰ روز").tag(30); Text("۹۰ روز").tag(90)
+                            }.frame(maxWidth: 260)
+                            Button("پاک‌سازی فایل‌های منقضی") {
+                                preferences.purge(chat: state.lanHub.chat, library: state.lanHub.library)
+                            }
+                        }
+                        HStack {
+                            Button("خروجی تشخیص‌ها") { Diagnostics.export(Diagnostics.report(state: state, preferences: preferences)) }
+                            Text("شماره‌ها و متن پیام‌ها در خروجی نیستند.").font(.caption).foregroundStyle(ModemTheme.muted)
+                        }
+                    }
+                }
+                SoftCard {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("درباره", systemImage: "info.circle").font(.headline).foregroundStyle(ModemTheme.blue)
-                        LabeledContent("نسخه", value: "2.3.0")
+                        LabeledContent("نسخه", value: "2.6.0")
                         LabeledContent("پیاده‌سازی", value: "Swift 6 + SwiftUI")
                         Text("نسخهٔ بومی، مستقل و بدون Python یا وب‌سرور. تماس سیم‌کارتی توسط این مودم پشتیبانی نمی‌شود؛ تشخیص تماس ازدست‌رفته بر پایهٔ پیامک اپراتور است.").font(.caption).foregroundStyle(ModemTheme.muted)
                     }
