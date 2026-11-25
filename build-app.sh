@@ -1,6 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+# Use the user-space toolchain when the system Command Line Tools are broken.
+if [ -x "$HOME/.swiftly/bin/swift" ]; then
+  export PATH="$HOME/.swiftly/bin:$PATH"
+fi
+
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="$ROOT/dist/MyModem.app"
 CONTENTS="$APP/Contents"
