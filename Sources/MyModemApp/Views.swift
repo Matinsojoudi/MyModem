@@ -17,6 +17,7 @@ struct RootView: View {
                     case .fileShare: FileShareView(server: state.fileShare)
                     case .transfer: TransferView(hub: state.lanHub)
                     case .chat: ChatView(hub: state.lanHub)
+                    case .broadcast: BroadcastView(state: state)
                     case .settings: SettingsView(state: state, preferences: state.preferences)
                     }
                 }
@@ -630,7 +631,7 @@ struct SettingsView: View {
                 SoftCard {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("درباره", systemImage: "info.circle").font(.headline).foregroundStyle(ModemTheme.blue)
-                        LabeledContent("نسخه", value: "2.8.0")
+                        LabeledContent("نسخه", value: "2.9.0")
                         LabeledContent("پیاده‌سازی", value: "Swift 6 + SwiftUI")
                         Text("نسخهٔ بومی، مستقل و بدون Python یا وب‌سرور. تماس سیم‌کارتی توسط این مودم پشتیبانی نمی‌شود؛ تشخیص تماس ازدست‌رفته بر پایهٔ پیامک اپراتور است.").font(.caption).foregroundStyle(ModemTheme.muted)
                     }

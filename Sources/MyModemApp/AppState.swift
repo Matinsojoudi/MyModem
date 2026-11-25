@@ -15,6 +15,7 @@ final class AppState {
         case fileShare = "ارسال سریع"
         case transfer = "کتابخانه و کلیپ‌بورد"
         case chat = "گفتگوی LAN"
+        case broadcast = "پیام همگانی"
         case settings = "تنظیمات"
         var id: String { rawValue }
         var symbol: String {
@@ -27,6 +28,7 @@ final class AppState {
             case .fileShare: "square.and.arrow.up.fill"
             case .transfer: "folder.badge.gearshape"
             case .chat: "bubble.left.and.bubble.right.fill"
+            case .broadcast: "megaphone.fill"
             case .settings: "gearshape.fill"
             }
         }
@@ -62,6 +64,7 @@ final class AppState {
     var rebootPhase: RebootPhase = .idle
     let fileShare = FileShareServer()
     let lanHub = LANHub()
+    let broadcast = BroadcastEngine()
     let preferences = AppPreferences()
 
     private let client: ModemClient
@@ -247,6 +250,12 @@ final class AppState {
             let sorted = messages.sorted { $0.rawTime < $1.rawTime }
             return Conversation(peerNumber: peer, displayName: names[peer] ?? sorted.first?.displaySender ?? peer, messages: sorted)
         }.sorted { ($0.lastMessage?.rawTime ?? "") > ($1.lastMessage?.rawTime ?? "") }
+    }
+
+    func startBroadcast() {
+        broadcast.start { [client] phone, text in
+            try await client.sendSMS(to: phone, text: text)
+        }
     }
 
     func sendMessage() async {
